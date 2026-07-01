@@ -1,4 +1,4 @@
-# The Watcher — Computer Vision Pipeline
+# The Watcher - Computer Vision Pipeline
 
 > **Intelligent multi-layer surveillance and face analysis pipeline built entirely on local, offline-first open-source models. No data ever leaves the machine.**
 
@@ -57,7 +57,7 @@ Camera / RTSP / Video File
   Live preview window  +  optional annotated video output
 ```
 
-**Key design principle:** A single `FrameContext` object travels through all layers, accumulating output from each. No layer modifies or replaces the object; it only adds fields.
+**Key design principle:** A single `FrameContext` object travels through all layers, accumulating output from each. No layer modifies or replaces the object - it only adds fields.
 
 ---
 
@@ -98,7 +98,7 @@ python -m venv .venv
 # source .venv/bin/activate  # Linux/macOS
 ```
 
-### 3. Install PyTorch (GPU — RTX 50-series / CUDA 12.8)
+### 3. Install PyTorch (GPU - RTX 50-series / CUDA 12.8)
 ```powershell
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 ```
@@ -182,7 +182,7 @@ python scripts/ram_checker.py --watch   # Live refresh every 3s
 python scripts/ram_checker.py --top 15  # Show top 15 processes
 ```
 
-> This script is fully standalone, copy it to any project. Requires only `psutil` (`pip install psutil`).
+> This script is fully standalone - copy it to any project. Requires only `psutil` (`pip install psutil`).
 
 ---
 
@@ -190,11 +190,11 @@ python scripts/ram_checker.py --top 15  # Show top 15 processes
 
 ```
 Computer_vision_watcher/
-├── main.py                              # Entry point, terminal menu
+├── main.py                              # Entry point - terminal menu
 ├── requirements.txt                     # Python dependencies
 │
 ├── models/                              # Model weights (gitignored)
-│   └── yolov8n-face.pt                 # 6.2 MB, download separately
+│   └── yolov8n-face.pt                 # 6.2 MB - download separately
 │
 ├── output/                             # Annotated output videos (gitignored)
 │
@@ -215,21 +215,21 @@ Computer_vision_watcher/
 │       ├── detector.py                 # YOLOv8n-face inference + coord scaling
 │       └── validator.py               # Draw detections + save annotated video
 │
-├── tests/                              # (Placeholder — unit tests coming in v0.2)
+├── tests/                              # (Placeholder - unit tests coming in v0.2)
 └── Documents/                          # Architecture documentation (.docx)
 ```
 
 ---
 
-## How It Works — Key Technical Details
+## How It Works - Key Technical Details
 
 ### The Frame Context Object
 Every frame travels as a single `FrameContext` dataclass from Layer 1 through all downstream layers. It carries:
-- `original_frame` -- raw BGR array, never modified, used for drawing and cropping
-- `preprocessed_frame` -- RGB 640x640 ready for YOLOv8
-- `original_shape` / `resized_shape` -- required for coordinate scaling
-- `camera_id`, `timestamp`, `frame_seq` -- metadata for tracking and storage
-- `detections` -- list of `Detection` objects populated by Layer 3
+- `original_frame` - raw BGR array, never modified, used for drawing and cropping
+- `preprocessed_frame` - RGB 640×640 ready for YOLOv8
+- `original_shape` / `resized_shape` - required for coordinate scaling
+- `camera_id`, `timestamp`, `frame_seq` - metadata for tracking and storage
+- `detections` - list of `Detection` objects populated by Layer 3
 
 ### Coordinate Scaling (Layer 3 critical step)
 YOLOv8 returns bounding boxes in the **resized** input space (640×640). These are scaled back to the original frame's coordinate space before drawing or passing downstream:
@@ -241,7 +241,7 @@ y_original = y_resized × (original_H / 640)
 ### GPU Usage
 - **VRAM:** YOLOv8 model weights and inference tensors run entirely on the GPU
 - **RAM:** Frame buffers (numpy arrays), FrameContext objects, and cv2 drawing operations run on CPU
-- **Observed:** ~75 FPS inference on RTX 5060 (post warmup), ~30 FPS end-to-end with webcam at 640x480
+- **Observed:** ~75 FPS inference on RTX 5060 (post warmup), ~30 FPS end-to-end with webcam at 640×480
 
 ### Privacy & Security
 - All models run **100% locally**. No frame data, embeddings, or metadata are sent externally.
@@ -252,15 +252,15 @@ y_original = y_resized × (original_H / 640)
 
 ## Roadmap
 
-- **v0.2.0** — Layer 4: Identity (InsightFace ArcFace + DeepSORT tracking + FAISS search)
-- **v0.3.0** — Layer 5: Expression Analysis (DeepFace)
-- **v0.4.0** — Layer 6: Analytics & Business Logic
-- **v0.5.0** — Layer 7: Storage (PostgreSQL + TimescaleDB + Redis + FAISS persistence)
-- **v0.8.0** — Layer 8: REST API (FastAPI)
-- **v1.0.0** -- Layer 9: Frontend Dashboard, full production MVP
+- **v0.2.0** - Layer 4: Identity (InsightFace ArcFace + DeepSORT tracking + FAISS search)
+- **v0.3.0** - Layer 5: Expression Analysis (DeepFace)
+- **v0.4.0** - Layer 6: Analytics & Business Logic
+- **v0.5.0** - Layer 7: Storage (PostgreSQL + TimescaleDB + Redis + FAISS persistence)
+- **v0.8.0** - Layer 8: REST API (FastAPI)
+- **v1.0.0** - Layer 9: Frontend Dashboard, full production MVP
 
 ---
 
 ## License
 
-[GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE) -- see the LICENSE file for details.
+[GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE) - see the LICENSE file for details.
