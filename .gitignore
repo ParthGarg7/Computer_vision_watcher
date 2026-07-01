@@ -216,3 +216,51 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+# Environment
+.venv/
+
+# Model weights (large binary files, download manually)
+models/*.pt
+models/*.pth
+models/*.onnx
+
+# Output videos (local only)
+output/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ─── The Watcher — Project Specific ──────────────────────────────────────────
+
+# Virtual environment (never commit — recreate with python -m venv .venv)
+.venv/
+
+# Model weights (large binary files — download manually via huggingface_hub)
+models/*.pt
+models/*.pth
+models/*.onnx
+models/*.bin
+
+# Annotated output videos (local only — too large for git)
+output/
+
+# Extracted documentation text files (generated from .docx — not source truth)
+docs_extracted.txt
+layer7_extracted.txt
+*_extracted.txt
+
+# HuggingFace cache (symlink warning workaround)
+.cache/
