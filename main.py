@@ -242,7 +242,20 @@ def run_pipeline(source: str, camera_id: str, validate: bool = False):
     # WINDOW_NORMAL: frame stretches to fill the window when resized or maximized.
     # Without this flag, the window is fixed-size and shows a black border.
     WIN_NAME = "The Watcher -- Layer 3 Detection"
-    cv2.namedWindow(WIN_NAME, cv2.WINDOW_NORMAL)
+    _gui_window = False
+    try:
+        cv2.namedWindow(WIN_NAME, cv2.WINDOW_NORMAL)
+        _gui_window = True
+    except cv2.error:
+        # Happens when opencv-python-headless is installed instead of opencv-python.
+        # Both packages cannot coexist -- headless wins and disables all GUI functions.
+        # Fix: pip uninstall opencv-python-headless; pip install --force-reinstall opencv-python
+        print()
+        print("  [ERROR] cv2.namedWindow failed -- opencv-python-headless is likely installed.")
+        print("  [FIX]   Run: pip uninstall opencv-python-headless -y")
+        print("  [FIX]   Then: pip install --force-reinstall opencv-python")
+        print("  [INFO]  Falling back to fixed-size window (fullscreen/resize disabled).")
+        print()
     _is_fullscreen = False
 
     # FPS tracking
@@ -328,7 +341,8 @@ def run_pipeline(source: str, camera_id: str, validate: bool = False):
                 # ── X button close detection ──────────────────────────────────
                 # cv2.waitKey() only catches keyboard, not the window close button.
                 # WND_PROP_VISIBLE returns < 1 when user clicks the X button.
-                if cv2.getWindowProperty(WIN_NAME, cv2.WND_PROP_VISIBLE) < 1:
+                # Only available when WINDOW_NORMAL is supported (not headless).
+                if _gui_window and cv2.getWindowProperty(WIN_NAME, cv2.WND_PROP_VISIBLE) < 1:
                     print("\n  Window closed by user (X button).")
                     break
 
@@ -339,7 +353,7 @@ def run_pipeline(source: str, camera_id: str, validate: bool = False):
                     print("\n  Stopped by user (Q key).")
                     break
 
-                elif key == ord("f"):
+                elif key == ord("f") and _gui_window:
                     # Toggle between fullscreen and normal window
                     _is_fullscreen = not _is_fullscreen
                     if _is_fullscreen:

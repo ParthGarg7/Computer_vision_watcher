@@ -237,8 +237,14 @@ class ValidationPipeline:
 
         # Create resizable window once before the loop (show_preview path)
         VAL_WIN = "The Watcher -- Layer 3 Validation"
+        _val_gui_window = False
         if show_preview:
-            cv2.namedWindow(VAL_WIN, cv2.WINDOW_NORMAL)
+            try:
+                cv2.namedWindow(VAL_WIN, cv2.WINDOW_NORMAL)
+                _val_gui_window = True
+            except cv2.error:
+                print("  [Warn] WINDOW_NORMAL not available -- headless opencv detected.")
+                print("  [Fix]  pip uninstall opencv-python-headless -y && pip install --force-reinstall opencv-python")
 
         try:
             # Step 1 — Open source (Layer 1)
@@ -300,8 +306,8 @@ class ValidationPipeline:
                     if show_preview:
                         cv2.imshow(VAL_WIN, annotated)
 
-                        # X button close detection
-                        if cv2.getWindowProperty(VAL_WIN, cv2.WND_PROP_VISIBLE) < 1:
+                        # X button close detection (only when WINDOW_NORMAL is supported)
+                        if _val_gui_window and cv2.getWindowProperty(VAL_WIN, cv2.WND_PROP_VISIBLE) < 1:
                             print("\n  [Validator] Window closed by user (X button).")
                             break
 
@@ -309,7 +315,7 @@ class ValidationPipeline:
                         if key == ord("q"):
                             print("\n  [Validator] User pressed Q. Stopping early.")
                             break
-                        elif key == ord("f"):
+                        elif key == ord("f") and _val_gui_window:
                             _val_fullscreen = not _val_fullscreen
                             prop = cv2.WINDOW_FULLSCREEN if _val_fullscreen else cv2.WINDOW_NORMAL
                             cv2.setWindowProperty(VAL_WIN, cv2.WND_PROP_FULLSCREEN, prop)

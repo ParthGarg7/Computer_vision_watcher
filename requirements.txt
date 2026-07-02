@@ -13,6 +13,12 @@
 #   python -c "from huggingface_hub import hf_hub_download; import shutil; shutil.copy(hf_hub_download('arnabdhar/YOLOv8-Face-Detection', 'model.pt'), 'models/yolov8n-face.pt')"
 
 # ─── Core computer vision ─────────────────────────────────────────────────────
+# IMPORTANT: Use opencv-python (NOT opencv-python-headless).
+# Some packages (insightface, albumentations) pull in opencv-python-headless as
+# a dependency. If both are installed, headless wins and disables all GUI
+# functions (imshow, namedWindow, etc.). Fix with:
+#   pip uninstall opencv-python-headless -y
+#   pip install --force-reinstall opencv-python
 opencv-python>=4.13.0
 
 # ─── Numerical computing ──────────────────────────────────────────────────────
