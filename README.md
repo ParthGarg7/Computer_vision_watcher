@@ -14,15 +14,15 @@
 
 The Watcher is a modular, 9-layer computer vision pipeline that ingests live camera streams or recorded video, detects faces in real time, identifies individuals, analyses expressions, and persists the results to a structured database. All processing runs locally on a single machine.
 
-**MVP Status (v0.1.0-alpha): Layers 1–3 are complete and working.**
+**MVP Status (v0.2.0-alpha): Layers 1–5 are complete and working.**
 
 | Layer | Name | Status |
 |-------|------|--------|
 | **1** | Ingestion | ✅ Done |
 | **2** | Preprocessing | ✅ Done |
 | **3** | Face Detection | ✅ Done |
-| 4 | Identity (InsightFace + DeepSORT + FAISS) | 🔜 Planned |
-| 5 | Expression Analysis (DeepFace) | 🔜 Planned |
+| **4** | Identity (InsightFace + DeepSORT + FAISS) | ✅ Done |
+| **5** | Expression Analysis (hsemotion-onnx) | ✅ Done |
 | 6 | Analytics & Business Logic | 🔜 Planned |
 | 7 | Storage (PostgreSQL + TimescaleDB + Redis) | 🔜 Planned |
 | 8 | API (FastAPI) | 🔜 Planned |

@@ -1,0 +1,95 @@
+﻿
+Layer 5: Expression AnalysisComputer Vision Pipeline - Architecture DocumentationPrimary and recommended choices are 
+highlighted in green throughout this document. All options listed operate fully offline and send no data externally.1. 
+What Is This LayerLayer 5 receives the face crop and identity context from Layer 4 and answers one question: what 
+visible facial pattern is present in this crop right now?This layer does not determine internal emotions, mental 
+states, or psychological conditions. It estimates visible expression signals — the observable configuration of facial 
+muscles — and outputs class probabilities. Claims about internal states such as stress, confidence, or attention must 
+be validated separately before any business use.Layer 4 established who the face belongs to and assigned a track ID. 
+Layer 5 takes that resolved face crop and generates a time-stamped expression reading that flows downstream to Layer 6 
+for analytics.2. Exact InputSource: Face crop from Layer 4 (Identity), passed alongside the Frame Context Object.The 
+input to this layer is:face_crop: NumPy array (H x W x 3), BGR uint8, already aligned and normalised by InsightFace 
+preprocessingtrack_id: integer, persistent identifier assigned by DeepSORTidentity_label: string or 'unknown', from 
+FAISS lookuptimestamp: float, epoch seconds from Frame Context Objectcamera_id: string, from Frame Context 
+Objectframe_seq: integer, frame sequence number from Frame Context ObjectThe expression model operates on the 
+face_crop only. All other fields travel through unchanged and are attached to the output event record.3. Exact 
+OutputThe layer emits one expression event record per detected face per frame:track_id: integeridentity_label: 
+stringtimestamp: floatcamera_id: stringframe_seq: integerexpression_scores: dict mapping expression class names to 
+float probabilities, summing to 1.0. Example: { 'happy': 0.72, 'neutral': 0.18, 'surprise': 0.06, 'sad': 0.03, 
+'angry': 0.01 }dominant_expression: string, argmax of expression_scoresconfidence: float, probability of 
+dominant_expressionThis record is passed to Layer 6 (Analytics) for aggregation and to Layer 7 (Storage) via 
+TimescaleDB for time-series persistence.4. Expression Analysis OptionsThe following libraries and models can serve as 
+the expression analysis layer. Each has different accuracy, speed, offline capability, and production readiness.4.1 
+DeepFaceThe primary and recommended choice for this pipeline's MVP phase.Unified Python library wrapping multiple 
+pretrained models including VGG-Face, Facenet, OpenFace, and ArcFace for facial analysis tasksBuilt-in emotion 
+analysis module outputs probability scores across seven classes: angry, disgust, fear, happy, sad, surprise, 
+neutralSingle function call interface: DeepFace.analyze(img_path, actions=['emotion']) returns a structured dict with 
+emotion probabilities and dominant emotionRuns fully offline once models are downloaded. No API calls, no telemetry, 
+no external data transmissionLimitation: not optimised for real-time throughput at high frame rates. Processes one 
+face crop at a time with noticeable latency on CPULimitation: emotion class labels reflect the training data 
+distribution (FER-2013 dataset) which may not match domain-specific expression patterns in interview or workplace 
+contexts4.2 FER (Facial Expression Recognition library)Lightweight alternative for faster MVP inference.Python library 
+built on top of Keras and TensorFlow, trained on FER-2013 datasetAccepts OpenCV BGR frames directly. Returns bounding 
+boxes and emotion probability dicts in one callSignificantly faster than DeepFace on CPU for single-face crops due to 
+smaller model architectureFully offline. No network calls required after installationLimitation: lower accuracy than 
+DeepFace on challenging conditions such as partial occlusion, extreme angles, or low-light cropsLimitation: limited to 
+seven standard emotion classes. No confidence calibration or temperature scaling out of the box4.3 MediaPipe Face Mesh 
+(Landmark-based features)Complementary approach using geometric facial features rather than classification.Produces 
+468 3D facial landmarks per face per frame at real-time speed on CPULandmark geometry can be used to compute 
+expression proxies: mouth aspect ratio for smile detection, eye openness for surprise, brow distance for frownFully 
+offline and extremely lightweight. Integrates directly with the existing MediaPipe installation from Layer 3Does not 
+output emotion class probabilities directly. Requires a thin classification layer trained on landmark features to 
+produce expression scoresAdvantage: interpretable features. Each expression proxy is geometrically traceable, which 
+aids validation and bias testingLimitation: requires custom feature engineering or a trained classifier on top of raw 
+landmarks to match DeepFace's out-of-the-box output format4.4 Custom PyTorch ModelThe recommended production path 
+replacing DeepFace after MVP validation.Full control over architecture, training data, expression class definitions, 
+and inference optimisationCan be trained on domain-specific data: workplace faces, interview settings, varied lighting 
+and camera angles relevant to actual deployment contextSupports batched inference, ONNX export, TensorRT optimisation, 
+and quantisation for production throughputRuns fully offline once trained. No dependency on any external service or 
+pretrained providerExpression classes can be defined to match business requirements rather than inheriting FER-2013 
+label setLimitation: requires labelled training data, validation infrastructure, model evaluation pipeline, and 
+significant engineering effort before deployment4.5 OpenCV + Haar Cascades (Smile Detector)Legacy option for extremely 
+constrained environments.OpenCV includes a pretrained smile Haar cascade (haarcascade_smile.xml) that detects smile 
+regions within a face cropExtremely fast and has zero additional dependencies beyond the existing OpenCV 
+installationFully offline with no model download requiredLimitation: binary detection only — smile or no smile. Cannot 
+produce multi-class expression probabilitiesLimitation: high false positive rate under varied lighting, facial hair, 
+or non-frontal posesNot suitable as a primary expression layer. Acceptable only as a lightweight sanity check or 
+fallback5. Comparison TableAll libraries in this table operate fully offline and send no data externally.LibraryWorks 
+OfflineSends Data OutsideOutput FormatCPU SpeedAccuracyBest ForDeepFaceYesNoProbability dict, 7 
+classesModerateHighMVP. Out-of-the-box emotion scores with minimal setupFER libraryYesNoProbability dict, 7 
+classesFastModerateFaster MVP inference on CPU; lower accuracy tradeoffMediaPipe Face MeshYesNo468 landmarks; 
+requires classifierVery FastDepends on classifierGeometric feature extraction; interpretable expression 
+proxiesCustom PyTorchYesNoConfigurable; ONNX exportableFast (GPU)Domain-tunedProduction. Domain-specific 
+training, batched inference, full controlOpenCV Haar SmileYesNoBinary: smile / no smileExtremely FastLowLegacy 
+fallback only. Not suitable as primary expression layer6. Recommendation by PhasePhaseRecommended 
+LibraryReasonMVP (Weeks 1–8)DeepFaceSingle-call emotion analysis returning structured probability dict. Requires 
+no custom training. Fully offline. Integrates directly with InsightFace face crops.Scale-up (Months 3–4)FER library 
+or MediaPipe + thin classifierFaster per-frame inference on CPU. MediaPipe landmarks enable interpretable expression 
+features useful for validation and bias analysis.Production (Month 5+)Custom PyTorch modelDomain-specific training 
+data, configurable expression classes, batched GPU inference, ONNX export for deployment. Full offline control with no 
+third-party model dependency.7. Security and Privacy NotesAll listed libraries operate fully offline. Expression 
+scores are computed in process memory and never transmitted to external servicesExpression scores constitute derived 
+biometric data. They must be treated with the same access controls applied to face embeddings from Layer 4The output 
+of this layer — expression probability scores — must not be stored or displayed in association with identity labels 
+without explicit consent and legal compliance review for the deployment jurisdictionClaims derived from expression 
+scores (stress, confidence, attention, engagement) require domain-specific validation before any business decision is 
+made on them. Model output and business claim are distinct artefactsFER-2013, the training dataset underlying DeepFace 
+and FER library, has known demographic imbalances. Accuracy may vary across skin tones and age groups. This must be 
+evaluated before production deploymentFor enterprise deployments, expression event records in TimescaleDB must be 
+encrypted at rest and access-controlled at the row level by camera zone and identity group8. References[1]Serengil, 
+S. and Ozpinar, A. (2020). LightFace: A Hybrid Deep Face Recognition Framework. 2020 Innovations in Intelligent 
+Systems and Applications Conference (ASYU). IEEE. Official paper introducing DeepFace. Confirms emotion analysis 
+module, model backends, and offline inference architecture.[2]Goodfellow, I. et al. (2013). Challenges in 
+Representation Learning: A Report on Three Machine Learning Contests. ICML 2013 Challenges in Representation Learning 
+Workshop. Introduces FER-2013 dataset. Supports all claims regarding seven-class emotion label set (angry, disgust, 
+fear, happy, sad, surprise, neutral) used by DeepFace and FER library.[3]Lugaresi, C. et al. (2019). MediaPipe: A 
+Framework for Building Perception Pipelines. arXiv:1906.08172. Google. Official MediaPipe paper. Confirms 468 landmark 
+Face Mesh model, real-time CPU performance, and offline local execution with no network calls.[4]Paszke, A. et al. 
+(2019). PyTorch: An Imperative Style, High-Performance Deep Learning Library. NeurIPS 2019. Advances in Neural 
+Information Processing Systems 32. Official PyTorch paper. Supports all claims regarding custom model training, ONNX 
+export, batched inference, and GPU optimisation for production deployment.[5]Xu, T. et al. (2020). Investigating 
+Bias and Fairness in Facial Expression Recognition. ECCV 2020 Workshops. Documents demographic accuracy variation in 
+FER-2013-trained models across skin tones and age groups. Directly supports the bias evaluation requirement stated in 
+Security and Privacy Notes.
+
+

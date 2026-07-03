@@ -9,6 +9,8 @@ output fields. No layer replaces the object — it always accumulates.
 
 Ref: Layer 2 Architecture Doc — Section 6: Output: The Frame Context Object
 Ref: Layer 3 Architecture Doc — Section 9: Exact Output
+Ref: Layer 4 Architecture Doc — Section 10: Exact Output
+Ref: Layer 5 Architecture Doc — Section 3: Exact Output
 """
 
 from dataclasses import dataclass, field
@@ -19,7 +21,18 @@ import numpy as np
 @dataclass
 class Detection:
     """
-    A single face detection result produced by Layer 3.
+    A single face detection result produced by Layer 3, enriched by Layers 4 and 5.
+
+    Layer 3 (Detection) populates:
+        bbox_original, bbox_resized, confidence, landmarks_original,
+        face_crop, face_crop_shape
+
+    Layer 4 (Identity) adds:
+        track_id, identity_label, embedding, similarity_score,
+        is_known, aligned_face
+
+    Layer 5 (Expression) adds:
+        expression_scores, dominant_expression, expression_confidence
 
     Fields
     ------
@@ -39,9 +52,7 @@ class Detection:
         5-point facial landmarks in original frame space:
             [(lx, ly, lconf), ...]
         Order: left_eye, right_eye, nose, mouth_left, mouth_right
-        None if the loaded checkpoint does not include a landmark head
-        (checkpoint-dependent — the arnabdhar detection model does
-        not output landmarks; a pose-capable checkpoint will).
+        None if the loaded checkpoint does not include a landmark head.
 
     face_crop : np.ndarray or None
         Cropped face region from original_frame (BGR, uint8) with a 15%
@@ -50,7 +61,52 @@ class Detection:
 
     face_crop_shape : tuple or None
         (H, W) of the face_crop array after padding.
+
+    ── Layer 4 fields (populated by FaceIdentifier) ──────────────────────
+
+    track_id : int or None
+        Persistent identity ID assigned by DeepSORT across frames.
+        Stable while the track is alive. Resets on application restart.
+        None if the tracker has not yet confirmed this detection.
+
+    identity_label : str or None
+        Human-readable name matched from the FAISS identity store.
+        None if the face is unregistered (below similarity threshold).
+        'unknown' string if explicitly labelled as unrecognised.
+
+    embedding : np.ndarray or None
+        L2-normalised ArcFace embedding vector, shape (512,) float32.
+        Already normalised by InsightFace — use np.dot() for cosine sim.
+        None if embedding extraction failed (e.g. crop too small).
+
+    similarity_score : float or None
+        Cosine similarity (0.0-1.0) between this embedding and the
+        nearest known identity in FAISS. None if no identity store entry.
+
+    is_known : bool or None
+        True if similarity_score exceeds the recognition threshold.
+        False if the face is unregistered. None before Layer 4 runs.
+
+    aligned_face : np.ndarray or None
+        112x112 BGR affine-warped face used as ArcFace input.
+        Stored for debugging and audit purposes.
+
+    ── Layer 5 fields (populated by ExpressionAnalyser) ──────────────────
+
+    expression_scores : dict or None
+        Probability distribution across emotion classes summing to 1.0.
+        Example: {'happy': 0.72, 'neutral': 0.18, 'sad': 0.05, ...}
+        None if Layer 5 has not run on this detection yet (throttled).
+
+    dominant_expression : str or None
+        Argmax of expression_scores. e.g. 'happy', 'neutral', 'sad'.
+        None if expression_scores is None.
+
+    expression_confidence : float or None
+        Probability of dominant_expression (max of expression_scores).
+        None if expression_scores is None.
     """
+    # ── Layer 3 fields ────────────────────────────────────────────────────
     bbox_original: list          # [x1, y1, x2, y2] original frame space
     bbox_resized: list           # [x1, y1, x2, y2] resized model space
     confidence: float
@@ -58,15 +114,30 @@ class Detection:
     face_crop: Optional[np.ndarray]       # BGR crop from original_frame
     face_crop_shape: Optional[tuple]      # (H, W) of the crop
 
+    # ── Layer 4 fields (default None — populated by FaceIdentifier) ───────
+    track_id: Optional[int] = None
+    identity_label: Optional[str] = None
+    embedding: Optional[np.ndarray] = None
+    similarity_score: Optional[float] = None
+    is_known: Optional[bool] = None
+    aligned_face: Optional[np.ndarray] = None
+
+    # ── Layer 5 fields (default None — populated by ExpressionAnalyser) ───
+    expression_scores: Optional[dict] = None
+    dominant_expression: Optional[str] = None
+    expression_confidence: Optional[float] = None
+
 
 @dataclass
 class FrameContext:
     """
     The single travelling object passed between all pipeline layers.
 
-    Layer 1 (Ingestion)    creates: original_frame, camera_id, timestamp, frame_seq
-    Layer 2 (Preprocessing) adds:  preprocessed_frame, original_shape, resized_shape
-    Layer 3 (Detection)     adds:  detections list
+    Layer 1 (Ingestion)      creates: original_frame, camera_id, timestamp, frame_seq
+    Layer 2 (Preprocessing)   adds:  preprocessed_frame, original_shape, resized_shape
+    Layer 3 (Detection)        adds:  detections list
+    Layer 4 (Identity)         adds:  track_id, embedding, identity_label per detection
+    Layer 5 (Expression)       adds:  expression_scores per detection
 
     Fields
     ------

@@ -6,6 +6,11 @@ __pycache__/
 # C extensions
 *.so
 
+# FAISS identity store (registered faces -- local data, never commit)
+models/*.faiss
+models/*.meta.json
+models/*.json
+
 # Distribution / packaging
 .Python
 build/
