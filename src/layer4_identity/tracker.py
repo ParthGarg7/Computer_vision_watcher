@@ -82,6 +82,7 @@ Ref: Layer 4 Architecture Doc — Sections 3 (Step 4), 6 (DeepSORT Parameters)
 Ref: Wojke et al. (2017). DeepSORT. ICIP 2017. arXiv:1703.07402.
 """
 
+import time
 import numpy as np
 from typing import List, Optional, Tuple
 
@@ -102,6 +103,33 @@ _rng = np.random.RandomState(42)
 _FALLBACK_EMB = _rng.randn(512).astype(np.float32)
 _FALLBACK_EMB /= np.linalg.norm(_FALLBACK_EMB)  # norm = 1.0
 del _rng
+
+# ── Display-ID reconciliation (stable IDs across departures) ─────────────────
+# DeepSORT deletes a track after max_age frames without detection and has NO
+# memory of deleted tracks — a person leaving frame for a few seconds always
+# comes back as a brand-new internal ID. Its internal counter also increments
+# for every initiated track, including 1-frame detection flickers, so raw IDs
+# inflate fast (observed: 3 people → "ID:98").
+#
+# FaceTracker therefore never exposes DeepSORT IDs. It maps them to small
+# sequential DISPLAY IDs and, when a new DeepSORT track appears, compares its
+# ArcFace embedding against a gallery of recently departed tracks — a match
+# re-acquires the departed person's display ID instead of minting a new one.
+
+# Cosine similarity required to re-acquire a departed track's display ID.
+# Same-person ArcFace similarity is typically 0.55-0.85; different people
+# score below ~0.30. Slightly stricter than the FAISS recognition threshold
+# (0.45) so two strangers are never merged into one ID.
+REACQUIRE_SIM_THRESHOLD = 0.50
+
+# How long a departed track stays eligible for re-acquisition.
+REACQUIRE_WINDOW_SEC = 120.0
+
+# Max departed tracks remembered (oldest evicted beyond this).
+DEPARTED_GALLERY_MAX = 50
+
+# EMA weight of the newest embedding in a track's identity centroid.
+EMB_EMA_ALPHA = 0.30
 
 
 class FaceTracker:
@@ -154,6 +182,12 @@ class FaceTracker:
             # we supply ArcFace embeddings directly via the feature param.
             embedder=None,
         )
+
+        # ── Display-ID reconciliation state (see module constants) ───────────
+        self._ds_to_display: dict = {}   # DeepSORT id → display id
+        self._active_info: dict = {}     # display id → {"emb", "last_seen"}
+        self._departed: dict = {}        # display id → {"emb", "last_seen"}
+        self._next_display_id = 1
         print(
             f"  [Layer4-Tracker] DeepSORT initialized "
             f"(max_age={max_age}, n_init={n_init}, "
@@ -167,7 +201,8 @@ class FaceTracker:
     def update(
         self,
         raw_detections: List[Tuple],
-        frame: np.ndarray
+        frame: np.ndarray,
+        timestamp: Optional[float] = None
     ) -> dict:
         """
         Update tracker with detections from the current frame.
@@ -191,17 +226,28 @@ class FaceTracker:
             as required by the API, but not re-processed internally since
             embedder=None.
 
+        timestamp : float or None
+            Capture time of this frame (ctx.timestamp). Used for the
+            re-acquisition window on departed tracks. None → time.time().
+
         Returns
         -------
         dict mapping detection index (int) → track_id (int).
+            IDs are stable DISPLAY IDs (small, sequential): the same person
+            re-entering the frame within REACQUIRE_WINDOW_SEC gets their
+            previous ID back (matched by ArcFace embedding), and DeepSORT's
+            internal ID churn is never exposed.
             Only confirmed tracks are included (n_init detections reached).
             Tentative tracks are excluded — they have no stable track_id yet.
         """
+        now = timestamp if timestamp is not None else time.time()
+
         if not raw_detections:
             # Must still call update to age out existing tracks via Kalman.
             # MUST pass embeds=[] explicitly — DeepSORT raises if embeds=None
             # when embedder=None, even on an empty detection list.
-            self._tracker.update_tracks([], embeds=[], frame=frame)
+            tracks = self._tracker.update_tracks([], embeds=[], frame=frame)
+            self._retire_stale(tracks, now)
             return {}
 
         # Build the input format DeepSort.update_tracks expects.
@@ -248,16 +294,105 @@ class FaceTracker:
 
         # Map confirmed track IDs back to detection indices.
         # DeepSORT does not return a 1-to-1 mapping — we recover it via bbox overlap.
-        track_id_map = {}  # det_idx → track_id
-
         confirmed = [t for t in tracks if t.is_confirmed()]
 
+        # Translate DeepSORT internal IDs → stable display IDs, feeding each
+        # detection's ArcFace embedding into the reconciler so a returning
+        # person re-acquires their old ID.
+        track_id_map = {}  # det_idx → display track_id
         for det_idx, (bbox_ltwh, confidence, embedding) in enumerate(raw_detections):
             best_track = self._find_best_track(bbox_ltwh, confirmed)
             if best_track is not None:
-                track_id_map[det_idx] = best_track.track_id
+                track_id_map[det_idx] = self._resolve_display_id(
+                    best_track.track_id, embedding, now
+                )
 
+        self._retire_stale(tracks, now)
         return track_id_map
+
+    # ─── Internal: display-ID reconciliation ──────────────────────────────────
+
+    def _resolve_display_id(self, ds_id, embedding, now: float) -> int:
+        """
+        Translate a DeepSORT internal track ID to a stable display ID.
+
+        Known DeepSORT ID → existing display ID (centroid updated).
+        New DeepSORT ID → try to re-acquire a recently departed display ID
+        by ArcFace similarity; otherwise mint the next sequential ID.
+        """
+        display_id = self._ds_to_display.get(ds_id)
+
+        if display_id is None:
+            display_id = self._match_departed(embedding, now)
+            if display_id is None:
+                display_id = self._next_display_id
+                self._next_display_id += 1
+            self._ds_to_display[ds_id] = display_id
+            self._active_info[display_id] = {"emb": None, "last_seen": now}
+
+        info = self._active_info[display_id]
+        info["last_seen"] = now
+
+        # Maintain an EMA identity centroid for this display ID. Skip the
+        # fallback vector — it carries no identity information.
+        if embedding is not None and embedding is not _FALLBACK_EMB:
+            emb = np.asarray(embedding, dtype=np.float32)
+            if info["emb"] is None:
+                info["emb"] = emb.copy()
+            else:
+                blended = (1.0 - EMB_EMA_ALPHA) * info["emb"] + EMB_EMA_ALPHA * emb
+                norm = np.linalg.norm(blended)
+                if norm > 1e-6:
+                    info["emb"] = blended / norm
+
+        return display_id
+
+    def _match_departed(self, embedding, now: float):
+        """
+        Find a recently departed display ID whose embedding centroid matches
+        this new track's embedding (cosine >= REACQUIRE_SIM_THRESHOLD within
+        REACQUIRE_WINDOW_SEC). Pops and returns the match, or None.
+        """
+        if embedding is None or embedding is _FALLBACK_EMB:
+            return None
+
+        # Drop entries past the re-acquisition window first
+        expired = [did for did, rec in self._departed.items()
+                   if now - rec["last_seen"] > REACQUIRE_WINDOW_SEC]
+        for did in expired:
+            self._departed.pop(did)
+
+        emb = np.asarray(embedding, dtype=np.float32)
+        best_id, best_sim = None, REACQUIRE_SIM_THRESHOLD
+        for did, rec in self._departed.items():
+            sim = float(np.dot(emb, rec["emb"]))  # both L2-normalised
+            if sim >= best_sim:
+                best_sim, best_id = sim, did
+
+        if best_id is not None:
+            self._departed.pop(best_id)
+        return best_id
+
+    def _retire_stale(self, tracks: list, now: float):
+        """
+        Move display IDs whose DeepSORT track no longer exists (deleted after
+        max_age) into the departed gallery so they can be re-acquired.
+        """
+        alive_ds_ids = {t.track_id for t in tracks}
+        gone = [ds for ds in self._ds_to_display if ds not in alive_ds_ids]
+        for ds_id in gone:
+            display_id = self._ds_to_display.pop(ds_id)
+            info = self._active_info.pop(display_id, None)
+            if info is not None and info["emb"] is not None:
+                self._departed[display_id] = {
+                    "emb": info["emb"],
+                    "last_seen": info["last_seen"],
+                }
+
+        # Cap the gallery — evict oldest departures beyond the limit
+        while len(self._departed) > DEPARTED_GALLERY_MAX:
+            oldest = min(self._departed, key=lambda d: self._departed[d]["last_seen"])
+            self._departed.pop(oldest)
 
     # ─── Internal ─────────────────────────────────────────────────────────────
 

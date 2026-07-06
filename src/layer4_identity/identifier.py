@@ -145,9 +145,12 @@ class FaceIdentifier:
             )
 
         # ── Step 3: Update tracker (must run even with empty list) ────────────
+        # ctx.timestamp drives the departed-track re-acquisition window, so
+        # video files (media time) and live sources (wall clock) both work.
         track_id_map = self.tracker.update(
             raw_detections_for_tracker,
-            frame=ctx.original_frame
+            frame=ctx.original_frame,
+            timestamp=ctx.timestamp
         )
 
         # ── Step 4: Write track_ids back to detections ────────────────────────
