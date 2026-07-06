@@ -76,8 +76,12 @@ def run_embedding_unit_tests():
     print(f"  [EmbedValidator] IdentityStore Unit Tests")
     print(f"{'─'*58}\n")
 
-    # Use a temp store path (in-memory only, not saved to models/)
-    store = IdentityStore(store_path="/tmp/_test_identity_store", recognition_threshold=0.45)
+    # Use a temp store path (never saved unless .save() is called, but keep
+    # it out of models/ regardless). tempfile works on Windows too — "/tmp"
+    # does not exist there.
+    import tempfile
+    _tmp_store = os.path.join(tempfile.gettempdir(), "_test_identity_store")
+    store = IdentityStore(store_path=_tmp_store, recognition_threshold=0.45)
 
     # Test 1: Empty store search
     emb = make_random_embedding()

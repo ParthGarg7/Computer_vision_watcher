@@ -162,7 +162,8 @@ def get_embedding_from_frame(
 
 def cmd_add_new(args, embedder: FaceEmbedder, store: IdentityStore):
     """Register a new person — generates a new UUID."""
-    print(f"\\n  ── ADD NEW PERSON ──")
+    print(f"\
+  ── ADD NEW PERSON ──")
 
     # Get image
     if args.image:
@@ -183,11 +184,13 @@ def cmd_add_new(args, embedder: FaceEmbedder, store: IdentityStore):
     person_id = store.register(embedding=embedding, name=name)
     store.save()
 
-    print(f"\\n  ✅ New person registered!")
+    print(f"\
+  ✅ New person registered!")
     print(f"     person_id : {person_id}")
     print(f"     name      : {name or '(none — use --set-name to add later)'}")
     print(f"     samples   : 1")
-    print(f"  Store saved → {args.store}\\n")
+    print(f"  Store saved → {args.store}\
+")
 
     # Show aligned face if available
     if aligned_face is not None:
@@ -204,7 +207,8 @@ def cmd_add_new(args, embedder: FaceEmbedder, store: IdentityStore):
 
 def cmd_add_sample(args, embedder: FaceEmbedder, store: IdentityStore):
     """Add another face sample to an existing person (by UUID)."""
-    print(f"\\n  ── ADD SAMPLE FOR EXISTING PERSON ──")
+    print(f"\
+  ── ADD SAMPLE FOR EXISTING PERSON ──")
 
     if not args.person_id:
         print("  [ERROR] --person-id is required for --add-sample.")
@@ -237,16 +241,19 @@ def cmd_add_sample(args, embedder: FaceEmbedder, store: IdentityStore):
     store.save()
 
     updated = store.get_person(args.person_id)
-    print(f"\\n  ✅ Sample added!")
+    print(f"\
+  ✅ Sample added!")
     print(f"     person_id : {args.person_id}")
     print(f"     name      : {updated['name'] or '(none)'}")
     print(f"     samples   : {updated['embedding_count']} (was {person['embedding_count']})")
-    print(f"  Store saved → {args.store}\\n")
+    print(f"  Store saved → {args.store}\
+")
 
 
 def cmd_set_name(args, store: IdentityStore):
     """Attach or update a display name for an existing person."""
-    print(f"\\n  ── SET NAME ──")
+    print(f"\
+  ── SET NAME ──")
 
     if not args.person_id:
         print("  [ERROR] --person-id is required for --set-name.")
@@ -258,7 +265,8 @@ def cmd_set_name(args, store: IdentityStore):
     try:
         store.update_name(args.person_id, args.name)
         store.save()
-        print(f"  ✅ Name updated for {args.person_id}: '{args.name}'\\n")
+        print(f"  ✅ Name updated for {args.person_id}: '{args.name}'\
+")
     except ValueError as e:
         print(f"  [ERROR] {e}")
 
@@ -266,10 +274,12 @@ def cmd_set_name(args, store: IdentityStore):
 def cmd_list(store: IdentityStore):
     """List all registered people."""
     people = store.list_people()
-    print(f"\\n  ── REGISTERED PEOPLE ({len(people)}) ──")
+    print(f"\
+  ── REGISTERED PEOPLE ({len(people)}) ──")
     if not people:
         print("  (empty — no faces registered yet)")
-        print("  Use --add-new to register the first person.\\n")
+        print("  Use --add-new to register the first person.\
+")
         return
 
     print(f"  {'UUID':38}  {'Name':20}  {'Samples':7}")
@@ -287,13 +297,15 @@ def cmd_list(store: IdentityStore):
 def cmd_search(args, store: IdentityStore):
     """Search registered people by display name."""
     query = args.search.lower()
-    print(f"\\n  ── SEARCH: '{args.search}' ──")
+    print(f"\
+  ── SEARCH: '{args.search}' ──")
     matches = [
         p for p in store.list_people()
         if p['name'] and query in p['name'].lower()
     ]
     if not matches:
-        print(f"  No people found with name matching '{args.search}'.\\n")
+        print(f"  No people found with name matching '{args.search}'.\
+")
         return
     print(f"  Found {len(matches)} match(es):")
     for p in matches:
@@ -308,9 +320,11 @@ def cmd_info(args, store: IdentityStore):
         return
     person = store.get_person(args.person_id)
     if person is None:
-        print(f"  [ERROR] No person found with UUID '{args.person_id}'.\\n")
+        print(f"  [ERROR] No person found with UUID '{args.person_id}'.\
+")
         return
-    print(f"\\n  ── PERSON INFO ──")
+    print(f"\
+  ── PERSON INFO ──")
     print(f"  person_id      : {person['person_id']}")
     print(f"  name           : {person['name'] or '(unnamed)'}")
     print(f"  face samples   : {person['embedding_count']}")
@@ -325,44 +339,53 @@ def cmd_delete(args, store: IdentityStore):
 
     person = store.get_person(args.person_id)
     if person is None:
-        print(f"  [ERROR] No person found with UUID '{args.person_id}'.\\n")
+        print(f"  [ERROR] No person found with UUID '{args.person_id}'.\
+")
         return
 
-    print(f"\\n  ── DELETE PERSON ──")
+    print(f"\
+  ── DELETE PERSON ──")
     print(f"  About to delete:")
     print(f"    person_id : {person['person_id']}")
     print(f"    name      : {person['name'] or '(unnamed)'}")
     print(f"    samples   : {person['embedding_count']} (will be permanently removed)")
 
-    confirm = input("\\n  Type 'yes' to confirm deletion: ").strip().lower()
+    confirm = input("\
+  Type 'yes' to confirm deletion: ").strip().lower()
     if confirm != "yes":
-        print("  Cancelled.\\n")
+        print("  Cancelled.\
+")
         return
 
     store.delete_person(args.person_id)
     store.save()
     print(f"  ✅ Person {args.person_id} and all {person['embedding_count']} "
-          f"embedding(s) deleted.\\n")
+          f"embedding(s) deleted.\
+")
 
 
 def cmd_clear(store: IdentityStore):
     """Delete ALL registered people."""
     people = store.list_people()
-    print(f"\\n  ── CLEAR ALL PEOPLE ({len(people)}) ──")
+    print(f"\
+  ── CLEAR ALL PEOPLE ({len(people)}) ──")
     if not people:
-        print("  Registry already empty.\\n")
+        print("  Registry already empty.\
+")
         return
     print(f"  This will PERMANENTLY delete {len(people)} people "
           f"and all their embeddings.")
     confirm = input("  Type 'DELETE ALL' to confirm: ").strip()
     if confirm != "DELETE ALL":
-        print("  Cancelled.\\n")
+        print("  Cancelled.\
+")
         return
 
     for p in people:
         store.delete_person(p['person_id'])
     store.save()
-    print(f"  ✅ All {len(people)} people deleted. Registry is now empty.\\n")
+    print(f"  ✅ All {len(people)} people deleted. Registry is now empty.\
+")
 
 
 # ─── Argument Parser ──────────────────────────────────────────────────────────
@@ -373,13 +396,20 @@ def build_parser() -> argparse.ArgumentParser:
         description="The Watcher — Face Registration CLI (Layer 4 Identity Store)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "Examples:\\n"
-            "  python scripts/register_face.py --add-new --image alice.jpg --name Alice\\n"
-            "  python scripts/register_face.py --add-sample --person-id <UUID> --image alice2.jpg\\n"
-            "  python scripts/register_face.py --set-name --person-id <UUID> --name Bob\\n"
-            "  python scripts/register_face.py --list\\n"
-            "  python scripts/register_face.py --search Alice\\n"
-            "  python scripts/register_face.py --delete <UUID>\\n"
+            "Examples:\
+"
+            "  python scripts/register_face.py --add-new --image alice.jpg --name Alice\
+"
+            "  python scripts/register_face.py --add-sample --person-id <UUID> --image alice2.jpg\
+"
+            "  python scripts/register_face.py --set-name --person-id <UUID> --name Bob\
+"
+            "  python scripts/register_face.py --list\
+"
+            "  python scripts/register_face.py --search Alice\
+"
+            "  python scripts/register_face.py --delete <UUID>\
+"
         )
     )
 
@@ -446,8 +476,12 @@ def main():
     if args.clear:
         cmd_clear(store)
         return
+    if args.set_name:
+        # Pure metadata update — never load the ~500 MB embedder for a rename
+        cmd_set_name(args, store)
+        return
 
-    # Commands that need the embedder
+    # Commands that need the embedder (--add-new, --add-sample)
     if args.no_model:
         print("  [ERROR] --no-model cannot be used with embedding commands.")
         sys.exit(1)
@@ -459,8 +493,6 @@ def main():
         cmd_add_new(args, embedder, store)
     elif args.add_sample:
         cmd_add_sample(args, embedder, store)
-    elif args.set_name:
-        cmd_set_name(args, store)
 
 
 if __name__ == "__main__":

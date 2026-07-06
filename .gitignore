@@ -269,3 +269,6 @@ layer7_extracted.txt
 
 # HuggingFace cache (symlink warning workaround)
 .cache/
+
+# Layer 7 storage (SQLite dev database — contains identity-linked session data)
+data/

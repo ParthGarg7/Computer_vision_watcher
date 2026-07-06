@@ -54,6 +54,9 @@ faiss-cpu>=1.8.0
 # First run downloads ~50 MB ONNX model weights (one-time).
 hsemotion-onnx
 
-# ONNX Runtime: inference backend for hsemotion-onnx.
-# onnxruntime-gpu available for GPU-accelerated expression inference.
+# ONNX Runtime: inference backend for hsemotion-onnx AND InsightFace.
+# For GPU inference (recommended — ~4ms vs ~50-80ms per expression crop):
+#   pip uninstall onnxruntime -y && pip install onnxruntime-gpu
+# CUDA DLLs are provided by the PyTorch install; src/core/gpu_setup.py
+# registers them on the Windows DLL search path automatically.
 onnxruntime>=1.18.0

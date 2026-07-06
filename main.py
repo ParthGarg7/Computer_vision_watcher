@@ -50,7 +50,8 @@ os.environ["YOLO_VERBOSE"] = "False"
 
 # ─── Banner ───────────────────────────────────────────────────────────────────
 
-def print_banner(enable_identity: bool = True, enable_expression: bool = True):
+def print_banner(enable_identity: bool = True, enable_expression: bool = True,
+                 enable_analytics: bool = True):
     gpu_info = "CPU only"
     if torch.cuda.is_available():
         name = torch.cuda.get_device_name(0)
@@ -62,6 +63,8 @@ def print_banner(enable_identity: bool = True, enable_expression: bool = True):
         layers_str += " → 4"
     if enable_expression:
         layers_str += " → 5"
+    if enable_analytics and enable_identity:
+        layers_str += " → 6 → 7"
 
     print()
     print("  ╔══════════════════════════════════════════════════════╗")
@@ -140,7 +143,7 @@ def _select_video_file() -> tuple:
         if not file_path:
             print("  No file selected. Returning to menu.\n")
             return select_source()
-    except (ImportError, Exception) as e:
+    except Exception as e:
         print(f"  File browser unavailable ({e}). Enter path manually.")
         try:
             file_path = input("  Video file path: ").strip().strip('"')
@@ -325,12 +328,14 @@ def run_pipeline(
     camera_id: str,
     validate: bool = False,
     enable_identity: bool = True,
-    enable_expression: bool = True
+    enable_expression: bool = True,
+    enable_analytics: bool = True
 ):
     """
-    Run the full Layer 1 → 2 → 3 → (4) → (5) pipeline.
+    Run the full Layer 1 → 2 → 3 → (4) → (5) → (6 → 7) pipeline.
 
-    Layers 4 and 5 can be disabled via flags for partial-pipeline runs.
+    Layers 4-7 can be disabled via flags for partial-pipeline runs.
+    Layers 6 (Analytics) and 7 (Storage) require Layer 4 (track IDs).
     """
     from src.layer1_ingestion.capture import VideoCapture
     from src.layer2_preprocessing.preprocessor import Preprocessor
@@ -353,6 +358,18 @@ def run_pipeline(
     elif enable_expression and not enable_identity:
         print("  [Warn] --no-identity was set; Layer 5 requires Layer 4. "
               "Skipping expression analysis.")
+
+    # Layers 6 (Analytics) + 7 (Storage) — session metrics need track IDs
+    aggregator = None
+    storage = None
+    if enable_analytics and enable_identity:
+        from src.layer6_analytics.aggregator import SessionAggregator
+        from src.layer7_storage.store import StorageLayer
+        storage = StorageLayer()
+        aggregator = SessionAggregator(storage=storage)
+    elif enable_analytics and not enable_identity:
+        print("  [Warn] --no-identity was set; Layers 6/7 require Layer 4 "
+              "track IDs. Skipping analytics and storage.")
 
     # VideoWriter
     writer = None
@@ -409,6 +426,22 @@ def run_pipeline(
                         active_ids = {d.track_id for d in ctx.detections
                                       if d.track_id is not None}
                         analyser.clear_stale_tracks(active_ids)
+
+                # Layers 6 + 7: Analytics → Storage (optional)
+                if aggregator is not None:
+                    for event in aggregator.process(ctx):
+                        et = event["event_type"]
+                        if et == "presence_alert":
+                            who = event["identity_label"] or "unknown"
+                            print(f"  [Layer6] Track {event['track_id']} "
+                                  f"({who}) {event['presence']}")
+                        elif et == "threshold_alert":
+                            who = event["identity_label"] or "unknown"
+                            print(f"  [Layer6] ALERT track {event['track_id']} "
+                                  f"({who}): {event['metric']} = "
+                                  f"{event['value']} > {event['threshold']}")
+                        # live_expression_update events are for Layer 8
+                        # (WebSocket push) — not printed to keep console quiet.
 
                 # FPS
                 fps_count += 1
@@ -477,6 +510,14 @@ def run_pipeline(
             writer.release()
             if output_path:
                 print(f"  Annotated video saved → {output_path}")
+        if aggregator is not None:
+            aggregator.close()  # finalize still-open sessions → Layer 7
+        if storage is not None:
+            storage.close()
+            print(f"\n  [Layer7] Persisted: {storage.n_sessions} sessions, "
+                  f"{storage.n_expression_events} expression events, "
+                  f"{storage.n_presence_events} presence events "
+                  f"→ {storage.db_path}")
         cv2.destroyAllWindows()
 
     print(f"\n  Session complete. Processed {frame_seq + 1} frames.\n")
@@ -504,13 +545,16 @@ def main():
                         help="Skip Layer 4 Identity (InsightFace). Useful before model download.")
     parser.add_argument("--no-expression", action="store_true",
                         help="Skip Layer 5 Expression Analysis.")
+    parser.add_argument("--no-analytics", action="store_true",
+                        help="Skip Layers 6 (Analytics) and 7 (Storage).")
 
     args = parser.parse_args()
 
     enable_identity = not args.no_identity
     enable_expression = not args.no_expression
+    enable_analytics = not args.no_analytics
 
-    print_banner(enable_identity, enable_expression)
+    print_banner(enable_identity, enable_expression, enable_analytics)
 
     if args.source is not None:
         source = args.source
@@ -528,12 +572,15 @@ def main():
     print(f"  Validate mode    : {'ON' if args.validate else 'OFF'}")
     print(f"  Layer 4 Identity : {'ON' if enable_identity else 'OFF (--no-identity)'}")
     print(f"  Layer 5 Expression: {'ON' if enable_expression else 'OFF (--no-expression)'}")
+    print(f"  Layers 6+7 Analytics/Storage: "
+          f"{'ON' if enable_analytics else 'OFF (--no-analytics)'}")
 
     run_pipeline(
         source, camera_id,
         validate=args.validate,
         enable_identity=enable_identity,
-        enable_expression=enable_expression
+        enable_expression=enable_expression,
+        enable_analytics=enable_analytics
     )
 
 

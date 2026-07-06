@@ -124,10 +124,16 @@ class FaceIdentifier:
                 # Store is empty — face is unknown but embedding succeeded
                 pid, label, score, is_known = None, None, 0.0, False
 
-            # Write identity fields to Detection
+            # Write identity fields to Detection.
+            # Contract (module docstring): when no embedding could be
+            # extracted, identity fields stay None — "unknown" is reserved
+            # for faces that WERE embedded but matched nothing.
             det.embedding = embedding
             det.aligned_face = aligned_face
-            det.identity_label = label if is_known else "unknown"
+            if embedding is None:
+                det.identity_label = None
+            else:
+                det.identity_label = label if is_known else "unknown"
             det.similarity_score = score
             det.is_known = is_known
 

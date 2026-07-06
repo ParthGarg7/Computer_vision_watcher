@@ -14,7 +14,7 @@
 
 The Watcher is a modular, 9-layer computer vision pipeline that ingests live camera streams or recorded video, detects faces in real time, identifies individuals, analyses expressions, and persists the results to a structured database. All processing runs locally on a single machine.
 
-**MVP Status (v0.2.0-alpha): Layers 1–5 are complete and working.**
+**MVP Status (v0.5.0-alpha): Layers 1–7 are complete and working.**
 
 | Layer | Name | Status |
 |-------|------|--------|
@@ -23,8 +23,8 @@ The Watcher is a modular, 9-layer computer vision pipeline that ingests live cam
 | **3** | Face Detection | ✅ Done |
 | **4** | Identity (InsightFace + DeepSORT + FAISS) | ✅ Done |
 | **5** | Expression Analysis (hsemotion-onnx) | ✅ Done |
-| 6 | Analytics & Business Logic | 🔜 Planned |
-| 7 | Storage (PostgreSQL + TimescaleDB + Redis) | 🔜 Planned |
+| **6** | Analytics & Business Logic (session metrics + alerts) | ✅ Done |
+| **7** | Storage (SQLite MVP; PostgreSQL/TimescaleDB at scale) | ✅ Done |
 | 8 | API (FastAPI) | 🔜 Planned |
 | 9 | Frontend Dashboard | 🔜 Planned |
 
@@ -250,12 +250,28 @@ y_original = y_resized × (original_H / 640)
 
 ---
 
+## Testing
+
+The unit test suite covers the identity store (FAISS), Layer 5 expression
+logic (label mapping, throttling, smoothing — with a mocked model, no
+downloads), Layer 6 analytics, Layer 7 storage, and the Layer 1-3 contracts.
+No GPU or model weights required; runs in under a second.
+
+```powershell
+python -m unittest discover tests
+```
+
+The heavier visual validators (real models, annotated output video) remain
+available: `python validate_layer4.py`, `python validate_layer5.py`.
+
+---
+
 ## Roadmap
 
-- **v0.2.0** - Layer 4: Identity (InsightFace ArcFace + DeepSORT tracking + FAISS search)
-- **v0.3.0** - Layer 5: Expression Analysis (DeepFace)
-- **v0.4.0** - Layer 6: Analytics & Business Logic
-- **v0.5.0** - Layer 7: Storage (PostgreSQL + TimescaleDB + Redis + FAISS persistence)
+- **v0.2.0** ✅ Layer 4: Identity (InsightFace ArcFace + DeepSORT tracking + FAISS search)
+- **v0.3.0** ✅ Layer 5: Expression Analysis (hsemotion-onnx)
+- **v0.4.0** ✅ Layer 6: Analytics & Business Logic (session metrics, presence/threshold alerts)
+- **v0.5.0** ✅ Layer 7: Storage (SQLite MVP schema mirroring PostgreSQL + TimescaleDB; FAISS persistence in Layer 4; Redis at scale-up)
 - **v0.8.0** - Layer 8: REST API (FastAPI)
 - **v1.0.0** - Layer 9: Frontend Dashboard, full production MVP
 

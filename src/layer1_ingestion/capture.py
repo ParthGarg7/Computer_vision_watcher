@@ -178,7 +178,12 @@ class VideoCapture:
         Generator that yields (frame_seq, timestamp, frame) tuples.
 
         frame_seq : int   — monotonically increasing index starting at 0
-        timestamp : float — Unix timestamp of capture (time.time())
+        timestamp : float — capture time as a Unix timestamp.
+            Live sources (webcam/RTSP): wall clock (time.time()).
+            Video files: start_time + frame_seq / fps — media time, so
+            downstream analytics (presence durations, trend windows) reflect
+            the video's own timeline rather than how fast this machine
+            happens to decode it.
         frame     : np.ndarray — BGR uint8 array (H, W, 3)
 
         Stops when the source is exhausted or cannot reconnect.
@@ -189,11 +194,17 @@ class VideoCapture:
                 # process frame
         """
         seq = 0
+        # Cache source properties once — is_live/fps query the backend and
+        # must not run per frame.
+        live = self.is_live
+        fps = self.fps
+        start_time = time.time()
         while True:
             ret, frame = self.read_frame()
             if not ret:
                 break
-            yield seq, time.time(), frame
+            ts = time.time() if live else start_time + seq / fps
+            yield seq, ts, frame
             seq += 1
 
     # ─── Lifecycle ────────────────────────────────────────────────────────────

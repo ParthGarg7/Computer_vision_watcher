@@ -319,16 +319,26 @@ class IdentityStore:
 
         Creates parent directories if they don't exist.
         Safe to call after every registration for durability.
+
+        Writes are atomic: both files are written to a .tmp sibling first
+        and swapped in with os.replace(), so a crash mid-save can never
+        leave a truncated index or metadata file (the previous complete
+        version survives). The registry is biometric data — a corrupt
+        store would silently break recognition for every registered person.
         """
         os.makedirs(os.path.dirname(self._faiss_path) or ".", exist_ok=True)
-        faiss.write_index(self._index, self._faiss_path)
+
+        faiss.write_index(self._index, self._faiss_path + ".tmp")
+        os.replace(self._faiss_path + ".tmp", self._faiss_path)
+
         meta_payload = {
             "meta": self._meta,
             "id_map": self._id_map,
             "threshold": self.recognition_threshold,
         }
-        with open(self._meta_path, "w", encoding="utf-8") as f:
+        with open(self._meta_path + ".tmp", "w", encoding="utf-8") as f:
             json.dump(meta_payload, f, indent=2)
+        os.replace(self._meta_path + ".tmp", self._meta_path)
 
     # ─── Internal ─────────────────────────────────────────────────────────────
 
