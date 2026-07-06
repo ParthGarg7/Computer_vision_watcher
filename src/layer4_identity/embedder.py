@@ -36,6 +36,8 @@ import numpy as np
 import cv2
 import os
 
+from src.core.gpu_setup import register_nvidia_dlls, cuda_is_usable
+
 # InsightFace import — requires: pip install insightface
 from insightface.app import FaceAnalysis
 
@@ -95,9 +97,12 @@ class FaceEmbedder:
         device : str
             'cuda', 'cpu', or 'auto' (auto-detects CUDA).
         """
-        import torch
+        # Register CUDA DLLs before any ONNX session is created — without
+        # this, InsightFace's CUDA provider silently falls back to CPU.
+        register_nvidia_dlls()
+
         if device == "auto":
-            self._device_id = 0 if torch.cuda.is_available() else -1
+            self._device_id = 0 if cuda_is_usable() else -1
         elif device == "cuda":
             self._device_id = 0
         else:
@@ -111,16 +116,30 @@ class FaceEmbedder:
         print(f"  [Layer4-Embedder] Device ID  : {self._device_id} "
               f"({'CUDA' if self._device_id >= 0 else 'CPU'})")
 
+        # allowed_modules: buffalo_l ships 5 models (SCRFD detection, ArcFace
+        # recognition, gender/age, 2D-106 and 3D-68 landmarks). The pipeline
+        # only uses detection + recognition — loading just those saves
+        # ~200 MB RAM/VRAM and skips 3 extra inferences per crop.
         self._app = FaceAnalysis(
             name=model_pack,
             root=_INSIGHTFACE_ROOT,
+            allowed_modules=["detection", "recognition"],
             providers=["CUDAExecutionProvider", "CPUExecutionProvider"]
             if self._device_id >= 0
             else ["CPUExecutionProvider"]
         )
         self._app.prepare(ctx_id=self._device_id, det_size=det_size)
 
-        print(f"  [Layer4-Embedder] Ready.\\n")
+        # Report the provider the recognition model actually got — ORT drops
+        # CUDA silently if its DLLs fail to load.
+        try:
+            rec_model = self._app.models.get("recognition")
+            actual = rec_model.session.get_providers()
+            print(f"  [Layer4-Embedder] ONNX providers: {actual}")
+        except Exception:
+            pass
+
+        print(f"  [Layer4-Embedder] Ready.\n")
 
     # ─── Public API ───────────────────────────────────────────────────────────
 

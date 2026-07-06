@@ -34,7 +34,15 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
+# ── NVIDIA DLL registration (MUST happen before any ONNX/GPU imports) ─────────
+# Shared with the layer validators — see src/core/gpu_setup.py.
+# ONNX Runtime's CUDAExecutionProvider needs cublas64_12.dll, cudnn64_9.dll etc.
+# on the Windows DLL search path; without this it silently falls back to CPU.
+from src.core.gpu_setup import register_nvidia_dlls
+register_nvidia_dlls()
+
 import cv2
+import numpy as np
 import torch
 
 os.environ["YOLO_VERBOSE"] = "False"
@@ -262,14 +270,21 @@ def draw_all_detections(
                 label_y = _put_label(display, id_txt, x1, label_y,
                                       bg, _C["id_txt"])
 
-        # ── Expression (Layer 5) ──────────────────────────────────────────
+        # ── Expression (Layer 5) ──────────────────────────────────
+        # Only show expression if confidence meets minimum threshold.
+        # Below 0.35 the model is essentially guessing (8 classes = 12.5% random)
+        # and showing a wrong label is worse than showing nothing.
+        EXPR_MIN_CONFIDENCE = 0.35
         if enable_expression and det.dominant_expression:
-            expr_txt = (f"{det.dominant_expression} "
-                        f"{det.expression_confidence:.0%}"
-                        if det.expression_confidence
-                        else det.dominant_expression)
+            conf = det.expression_confidence or 0.0
+            if conf >= EXPR_MIN_CONFIDENCE:
+                expr_txt = f"{det.dominant_expression} {conf:.0%}"
+                expr_bg = _C["expr_bg"]
+            else:
+                expr_txt = f"uncertain {conf:.0%}"
+                expr_bg = (60, 60, 60)  # dark grey for low-confidence
             _put_label(display, expr_txt, x1, label_y,
-                       _C["expr_bg"], _C["expr_txt"])
+                       expr_bg, _C["expr_txt"])
 
             # Probability bars (top-3)
             if det.expression_scores:
@@ -388,6 +403,12 @@ def run_pipeline(
                 # Layer 5: Expression (optional)
                 if analyser is not None:
                     ctx = analyser.analyse(ctx)
+                    # Drop throttle/smoothing state for ended tracks so
+                    # per-track buffers don't grow forever in long sessions.
+                    if frame_seq % 100 == 0:
+                        active_ids = {d.track_id for d in ctx.detections
+                                      if d.track_id is not None}
+                        analyser.clear_stale_tracks(active_ids)
 
                 # FPS
                 fps_count += 1
@@ -423,17 +444,10 @@ def run_pipeline(
 
                 # ── X button / Q key exit detection ──────────────────────────
                 # cv2.getWindowProperty returns -1.0 when the window has been
-                # closed by the OS (X button). The < 1 check catches both
-                # -1.0 (destroyed) and 0.0 (hidden/minimised then closed).
-                if _gui_window:
-                    try:
-                        vis = cv2.getWindowProperty(WIN_NAME, cv2.WND_PROP_VISIBLE)
-                        if vis < 1:
-                            print("\n  Window closed by user (X button). Stopping.")
-                            _stop = True
-                    except cv2.error:
-                        _stop = True
-
+                # destroyed by the OS (user clicked X). We check both
+                # WND_PROP_VISIBLE (== 0 when closed) AND WND_PROP_AUTOSIZE
+                # (== -1 when window no longer exists) for cross-platform
+                # reliability on Windows + OpenCV builds.
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord("q") or key == 27:  # Q or ESC
                     print("\n  Stopped by user (Q / ESC key).")
@@ -442,6 +456,18 @@ def run_pipeline(
                     _is_fullscreen = not _is_fullscreen
                     prop = cv2.WINDOW_FULLSCREEN if _is_fullscreen else cv2.WINDOW_NORMAL
                     cv2.setWindowProperty(WIN_NAME, cv2.WND_PROP_FULLSCREEN, prop)
+
+                if _gui_window and not _stop:
+                    try:
+                        # WND_PROP_VISIBLE: -1.0 = destroyed, 0.0 = hidden
+                        vis = cv2.getWindowProperty(WIN_NAME, cv2.WND_PROP_VISIBLE)
+                        # WND_PROP_AUTOSIZE: -1.0 = window no longer exists
+                        auto = cv2.getWindowProperty(WIN_NAME, cv2.WND_PROP_AUTOSIZE)
+                        if vis < 0 or auto < 0:
+                            print("\n  Window closed by user (X button). Stopping.")
+                            _stop = True
+                    except cv2.error:
+                        _stop = True
 
                 if _stop:
                     break

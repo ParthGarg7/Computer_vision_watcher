@@ -68,7 +68,7 @@ class FaceIdentifier:
         device : str
             'cuda', 'cpu', or 'auto'. Passed to FaceEmbedder (InsightFace).
         """
-        print(f"\\n  Initializing Layer 4: Identity...")
+        print(f"\n  Initializing Layer 4: Identity...")
 
         self.embedder = FaceEmbedder(device=device)
         self.store = IdentityStore(
@@ -80,7 +80,7 @@ class FaceIdentifier:
         print(
             f"  [Layer4] Ready. "
             f"Registry: {self.store.n_people} people, "
-            f"{self.store.n_embeddings} embeddings.\\n"
+            f"{self.store.n_embeddings} embeddings.\n"
         )
 
     # ─── Public API ───────────────────────────────────────────────────────────

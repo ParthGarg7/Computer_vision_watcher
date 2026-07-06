@@ -95,6 +95,14 @@ N_INIT = 3                # Consecutive detections to confirm a new track
 MAX_COSINE_DISTANCE = 0.45  # Tuned for ArcFace 512-d (default was 0.2 for 128-d)
 NN_BUDGET = 100           # Max embeddings stored per track in appearance gallery
 
+# Constant unit-vector substitute for detections with no ArcFace embedding.
+# Computed once at import — regenerating it per frame wasted allocations.
+# See the WHY NOT a zero-vector note in FaceTracker.update().
+_rng = np.random.RandomState(42)
+_FALLBACK_EMB = _rng.randn(512).astype(np.float32)
+_FALLBACK_EMB /= np.linalg.norm(_FALLBACK_EMB)  # norm = 1.0
+del _rng
+
 
 class FaceTracker:
     """
@@ -220,10 +228,6 @@ class FaceTracker:
         #   Cosine distance to any real ArcFace embedding ≈ 1.0 (orthogonal),
         #   so these crops get no appearance match and DeepSORT falls back to
         #   pure Kalman/IoU tracking — exactly the intended behaviour.
-        rng = np.random.RandomState(42)
-        _FALLBACK_EMB = rng.randn(512).astype(np.float32)
-        _FALLBACK_EMB /= np.linalg.norm(_FALLBACK_EMB)  # norm = 1.0
-
         deepsort_input = []   # list of (bbox_ltwh, confidence, class_id)
         embeds_list    = []   # parallel list of 512-d embeddings
         det_indices    = []   # track which raw_detection index each entry maps to
