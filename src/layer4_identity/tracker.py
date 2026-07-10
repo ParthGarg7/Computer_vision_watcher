@@ -112,20 +112,32 @@ del _rng
 # inflate fast (observed: 3 people → "ID:98").
 #
 # FaceTracker therefore never exposes DeepSORT IDs. It maps them to small
-# sequential DISPLAY IDs and, when a new DeepSORT track appears, compares its
-# ArcFace embedding against a gallery of recently departed tracks — a match
-# re-acquires the departed person's display ID instead of minting a new one.
+# sequential DISPLAY IDs, and re-acquires a returning person's display ID by
+# two signals, strongest first:
+#   1. FAISS identity (person_id) — for REGISTERED people. This is the same
+#      recognition that shows their name, so it is robust to head pose and
+#      brief absences and persists for the whole run. A recognised person
+#      keeps ONE display ID no matter how they turn or how long they step
+#      away. This is the primary fix for "returned as ID 7 / name still shows
+#      from the side": the embedding centroid below was too pose-sensitive to
+#      hold the ID even though FAISS still recognised the face.
+#   2. ArcFace embedding centroid gallery — the fallback for UNKNOWN
+#      (unregistered) people, who have no stable identity key. A new track's
+#      embedding is compared against recently departed unknown tracks.
 
-# Cosine similarity required to re-acquire a departed track's display ID.
-# Same-person ArcFace similarity is typically 0.55-0.85; different people
-# score below ~0.30. Slightly stricter than the FAISS recognition threshold
-# (0.45) so two strangers are never merged into one ID.
+# Cosine similarity required to re-acquire a departed UNKNOWN track's display
+# ID by embedding centroid. Same-person ArcFace similarity is typically
+# 0.55-0.85 frontal, but drops sharply at profile angles — which is exactly
+# why registered people are re-acquired by FAISS identity instead. Kept
+# slightly stricter than the FAISS recognition threshold (0.45) so two
+# strangers are never merged into one ID.
 REACQUIRE_SIM_THRESHOLD = 0.50
 
-# How long a departed track stays eligible for re-acquisition.
+# How long a departed UNKNOWN track stays eligible for centroid re-acquisition.
+# (Registered people re-acquire by identity with no time limit.)
 REACQUIRE_WINDOW_SEC = 120.0
 
-# Max departed tracks remembered (oldest evicted beyond this).
+# Max departed unknown tracks remembered (oldest evicted beyond this).
 DEPARTED_GALLERY_MAX = 50
 
 # EMA weight of the newest embedding in a track's identity centroid.
@@ -184,9 +196,10 @@ class FaceTracker:
         )
 
         # ── Display-ID reconciliation state (see module constants) ───────────
-        self._ds_to_display: dict = {}   # DeepSORT id → display id
-        self._active_info: dict = {}     # display id → {"emb", "last_seen"}
-        self._departed: dict = {}        # display id → {"emb", "last_seen"}
+        self._ds_to_display: dict = {}      # DeepSORT id → display id
+        self._active_info: dict = {}        # display id → {"emb", "last_seen"}
+        self._departed: dict = {}           # display id → {"emb", "last_seen"}
+        self._identity_to_display: dict = {}  # FAISS person_id → display id
         self._next_display_id = 1
         print(
             f"  [Layer4-Tracker] DeepSORT initialized "
@@ -202,7 +215,8 @@ class FaceTracker:
         self,
         raw_detections: List[Tuple],
         frame: np.ndarray,
-        timestamp: Optional[float] = None
+        timestamp: Optional[float] = None,
+        identity_keys: Optional[List] = None
     ) -> dict:
         """
         Update tracker with detections from the current frame.
@@ -229,6 +243,12 @@ class FaceTracker:
         timestamp : float or None
             Capture time of this frame (ctx.timestamp). Used for the
             re-acquisition window on departed tracks. None → time.time().
+
+        identity_keys : list or None
+            Parallel to raw_detections: the FAISS person_id (str) for each
+            recognised face, or None for unknown/unregistered faces. When
+            present, a recognised person's display ID is pinned to their
+            identity so it survives pose changes and long absences.
 
         Returns
         -------
@@ -297,14 +317,16 @@ class FaceTracker:
         confirmed = [t for t in tracks if t.is_confirmed()]
 
         # Translate DeepSORT internal IDs → stable display IDs, feeding each
-        # detection's ArcFace embedding into the reconciler so a returning
+        # detection's identity + embedding into the reconciler so a returning
         # person re-acquires their old ID.
         track_id_map = {}  # det_idx → display track_id
         for det_idx, (bbox_ltwh, confidence, embedding) in enumerate(raw_detections):
             best_track = self._find_best_track(bbox_ltwh, confirmed)
             if best_track is not None:
+                ikey = (identity_keys[det_idx]
+                        if identity_keys is not None else None)
                 track_id_map[det_idx] = self._resolve_display_id(
-                    best_track.track_id, embedding, now
+                    best_track.track_id, embedding, now, ikey
                 )
 
         self._retire_stale(tracks, now)
@@ -312,40 +334,77 @@ class FaceTracker:
 
     # ─── Internal: display-ID reconciliation ──────────────────────────────────
 
-    def _resolve_display_id(self, ds_id, embedding, now: float) -> int:
+    def _resolve_display_id(self, ds_id, embedding, now: float,
+                            identity_key=None) -> int:
         """
         Translate a DeepSORT internal track ID to a stable display ID.
 
-        Known DeepSORT ID → existing display ID (centroid updated).
-        New DeepSORT ID → try to re-acquire a recently departed display ID
-        by ArcFace similarity; otherwise mint the next sequential ID.
-        """
-        display_id = self._ds_to_display.get(ds_id)
+        Recognised person (identity_key set) → pin the display ID to their
+        FAISS identity, healing any ID this track was mis-assigned before
+        recognition kicked in. Robust to pose and absence duration.
 
+        Unknown person → existing per-track mapping, else re-acquire a
+        recently departed display ID by ArcFace centroid, else a new ID.
+        """
+        if identity_key is not None:
+            return self._resolve_known(ds_id, embedding, now, identity_key)
+        return self._resolve_unknown(ds_id, embedding, now)
+
+    def _resolve_known(self, ds_id, embedding, now, identity_key) -> int:
+        pinned = self._identity_to_display.get(identity_key)
+        current = self._ds_to_display.get(ds_id)
+
+        if pinned is None:
+            # First sighting of this identity this run — adopt the display ID
+            # this track already carries (if any), else mint a fresh one.
+            pinned = current if current is not None else self._new_display_id()
+            self._identity_to_display[identity_key] = pinned
+
+        if current is not None and current != pinned:
+            # Track was numbered before FAISS recognised it — retire the
+            # stray ID so it doesn't linger in the active/departed maps.
+            self._active_info.pop(current, None)
+            self._departed.pop(current, None)
+
+        self._ds_to_display[ds_id] = pinned
+        info = self._active_info.setdefault(pinned, {"emb": None, "last_seen": now})
+        info["last_seen"] = now
+        self._update_centroid(info, embedding)
+        return pinned
+
+    def _resolve_unknown(self, ds_id, embedding, now) -> int:
+        display_id = self._ds_to_display.get(ds_id)
         if display_id is None:
             display_id = self._match_departed(embedding, now)
             if display_id is None:
-                display_id = self._next_display_id
-                self._next_display_id += 1
+                display_id = self._new_display_id()
             self._ds_to_display[ds_id] = display_id
             self._active_info[display_id] = {"emb": None, "last_seen": now}
 
         info = self._active_info[display_id]
         info["last_seen"] = now
-
-        # Maintain an EMA identity centroid for this display ID. Skip the
-        # fallback vector — it carries no identity information.
-        if embedding is not None and embedding is not _FALLBACK_EMB:
-            emb = np.asarray(embedding, dtype=np.float32)
-            if info["emb"] is None:
-                info["emb"] = emb.copy()
-            else:
-                blended = (1.0 - EMB_EMA_ALPHA) * info["emb"] + EMB_EMA_ALPHA * emb
-                norm = np.linalg.norm(blended)
-                if norm > 1e-6:
-                    info["emb"] = blended / norm
-
+        self._update_centroid(info, embedding)
         return display_id
+
+    def _new_display_id(self) -> int:
+        did = self._next_display_id
+        self._next_display_id += 1
+        return did
+
+    @staticmethod
+    def _update_centroid(info: dict, embedding):
+        """EMA-update a display ID's identity centroid. Ignores the fallback
+        vector, which carries no identity information."""
+        if embedding is None or embedding is _FALLBACK_EMB:
+            return
+        emb = np.asarray(embedding, dtype=np.float32)
+        if info["emb"] is None:
+            info["emb"] = emb.copy()
+        else:
+            blended = (1.0 - EMB_EMA_ALPHA) * info["emb"] + EMB_EMA_ALPHA * emb
+            norm = np.linalg.norm(blended)
+            if norm > 1e-6:
+                info["emb"] = blended / norm
 
     def _match_departed(self, embedding, now: float):
         """
@@ -375,14 +434,20 @@ class FaceTracker:
 
     def _retire_stale(self, tracks: list, now: float):
         """
-        Move display IDs whose DeepSORT track no longer exists (deleted after
-        max_age) into the departed gallery so they can be re-acquired.
+        Handle display IDs whose DeepSORT track no longer exists (deleted
+        after max_age). Identity-pinned displays keep their persistent
+        identity→display mapping (re-acquired by FAISS on return). Unknown
+        displays move to the embedding gallery for centroid re-acquisition.
         """
         alive_ds_ids = {t.track_id for t in tracks}
+        pinned_displays = set(self._identity_to_display.values())
         gone = [ds for ds in self._ds_to_display if ds not in alive_ds_ids]
         for ds_id in gone:
             display_id = self._ds_to_display.pop(ds_id)
             info = self._active_info.pop(display_id, None)
+            if display_id in pinned_displays:
+                # Re-acquired by identity, not by the embedding gallery.
+                continue
             if info is not None and info["emb"] is not None:
                 self._departed[display_id] = {
                     "emb": info["emb"],

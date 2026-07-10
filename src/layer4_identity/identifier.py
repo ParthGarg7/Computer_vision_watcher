@@ -107,6 +107,7 @@ class FaceIdentifier:
             Same object with Layer 4 fields populated on each Detection.
         """
         raw_detections_for_tracker = []
+        identity_keys = []  # parallel to raw_detections: FAISS person_id or None
 
         # ── Step 1 + 2: Embed + Identify each detection ──────────────────────
         for det in ctx.detections:
@@ -132,8 +133,10 @@ class FaceIdentifier:
             det.aligned_face = aligned_face
             if embedding is None:
                 det.identity_label = None
+                det.person_id = None
             else:
                 det.identity_label = label if is_known else "unknown"
+                det.person_id = pid if is_known else None
             det.similarity_score = score
             det.is_known = is_known
 
@@ -143,6 +146,10 @@ class FaceIdentifier:
             raw_detections_for_tracker.append(
                 (bbox_ltwh, det.confidence, embedding)
             )
+            # A recognised person's FAISS UUID is the strongest re-ID signal
+            # available — pass it so the tracker pins their display ID to it
+            # rather than relying on a pose-sensitive embedding centroid.
+            identity_keys.append(det.person_id)
 
         # ── Step 3: Update tracker (must run even with empty list) ────────────
         # ctx.timestamp drives the departed-track re-acquisition window, so
@@ -150,7 +157,8 @@ class FaceIdentifier:
         track_id_map = self.tracker.update(
             raw_detections_for_tracker,
             frame=ctx.original_frame,
-            timestamp=ctx.timestamp
+            timestamp=ctx.timestamp,
+            identity_keys=identity_keys
         )
 
         # ── Step 4: Write track_ids back to detections ────────────────────────

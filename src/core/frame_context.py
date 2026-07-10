@@ -117,6 +117,7 @@ class Detection:
     # ── Layer 4 fields (default None — populated by FaceIdentifier) ───────
     track_id: Optional[int] = None
     identity_label: Optional[str] = None
+    person_id: Optional[str] = None       # FAISS UUID — stable identity key
     embedding: Optional[np.ndarray] = None
     similarity_score: Optional[float] = None
     is_known: Optional[bool] = None

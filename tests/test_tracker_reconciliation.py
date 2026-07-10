@@ -63,6 +63,20 @@ class TrackerReconciliationTests(unittest.TestCase):
         self.assertIn(0, last, "track should be confirmed by now")
         return last[0]
 
+    def _step_known(self, detections, identity_keys):
+        """Advance one frame with per-detection FAISS identity keys."""
+        result = self.tracker.update(detections, FRAME, timestamp=self.t,
+                                     identity_keys=identity_keys)
+        self.t += 1.0 / FPS
+        return result
+
+    def _confirm_known(self, bbox, emb, pid, frames=4):
+        last = {}
+        for _ in range(frames):
+            last = self._step_known([(bbox, 0.9, emb)], [pid])
+        self.assertIn(0, last)
+        return last[0]
+
     def test_person_reacquires_id_after_leaving(self):
         # Person A confirmed → display ID assigned
         id_a = self._confirm_person([100, 100, 80, 80], EMB_A)
@@ -116,6 +130,57 @@ class TrackerReconciliationTests(unittest.TestCase):
         id_a_late = self._confirm_person([100, 100, 80, 80], EMB_A)
         self.assertNotEqual(id_a_late, id_a,
                             "IDs must not be re-acquired after the window")
+
+    def test_registered_person_keeps_id_despite_pose_change(self):
+        # The reported bug: registered person leaves ~25s, returns with a
+        # DIFFERENT embedding (side profile), FAISS still recognises them.
+        # Their display ID must NOT jump.
+        pid = "uuid-parth"
+        frontal = EMB_A
+        profile = unit_emb(555)  # deliberately dissimilar to frontal
+        self.assertLess(float(np.dot(frontal, profile)), 0.5)  # would fail centroid match
+
+        id_first = self._confirm_known([100, 100, 80, 80], frontal, pid)
+
+        for _ in range(20):  # gone long enough for DeepSORT to delete the track
+            self._step([])
+
+        # Returns as a profile view — centroid would miss, but FAISS pins it
+        id_back = self._confirm_known([420, 260, 80, 80], profile, pid)
+        self.assertEqual(id_back, id_first,
+                         "registered person must keep their ID across pose change")
+
+    def test_registered_id_survives_beyond_reacquire_window(self):
+        pid = "uuid-parth"
+        id_first = self._confirm_known([100, 100, 80, 80], EMB_A, pid)
+        for _ in range(20):
+            self._step([])
+        self.t += 300.0  # far beyond REACQUIRE_WINDOW_SEC
+        id_back = self._confirm_known([100, 100, 80, 80], EMB_A, pid)
+        self.assertEqual(id_back, id_first,
+                         "identity pinning has no time limit, unlike the gallery")
+
+    def test_two_registered_people_keep_distinct_ids(self):
+        ids = {}
+        for _ in range(5):
+            ids = self._step_known(
+                [([50, 50, 80, 80], 0.9, EMB_A),
+                 ([300, 50, 80, 80], 0.9, EMB_B)],
+                ["uuid-a", "uuid-b"])
+        self.assertEqual(len(set(ids.values())), 2)
+
+    def test_unknown_then_recognised_heals_to_pinned_id(self):
+        pid = "uuid-late"
+        # First frames: FAISS hasn't matched yet (None) — track gets some ID
+        last = {}
+        for _ in range(4):
+            last = self._step_known([([100, 100, 80, 80], 0.9, EMB_A)], [None])
+        unknown_id = last[0]
+        # FAISS now recognises the same continuous track
+        for _ in range(3):
+            last = self._step_known([([100, 100, 80, 80], 0.9, EMB_A)], [pid])
+        # The pinned ID equals the one already on screen (healed in place)
+        self.assertEqual(last[0], unknown_id)
 
     def test_missing_embedding_never_matches_gallery(self):
         id_a = self._confirm_person([100, 100, 80, 80], EMB_A)
