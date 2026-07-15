@@ -60,11 +60,10 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from src.layer4_identity.embedder import FaceEmbedder
-from src.layer4_identity.identity_store import IdentityStore
+from src.layer4_identity.identity_store import IdentityStore, DEFAULT_STORE_PATH
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
-DEFAULT_STORE_PATH = "models/identity_store"
 WEBCAM_INDEX = 0
 
 

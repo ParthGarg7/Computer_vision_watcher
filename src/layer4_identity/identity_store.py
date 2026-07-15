@@ -45,6 +45,11 @@ EMBEDDING_DIM = 512          # ArcFace embedding dimensionality
 DEFAULT_THRESHOLD = 0.45     # Cosine similarity threshold: recognised vs unknown
                              # Tune on real deployment data — see Arch Doc §8.
 
+# Base path for the two store files. Lives under faces/ — NOT models/ —
+# because this is irreplaceable biometric data, not a re-downloadable model
+# weight. faces/ is gitignored; never commit it.
+DEFAULT_STORE_PATH = "faces/db/identity_store"
+
 
 class IdentityStore:
     """
@@ -61,7 +66,7 @@ class IdentityStore:
 
     def __init__(
         self,
-        store_path: str = "models/identity_store",
+        store_path: str = DEFAULT_STORE_PATH,
         recognition_threshold: float = DEFAULT_THRESHOLD
     ):
         """

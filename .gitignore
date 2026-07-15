@@ -272,3 +272,8 @@ layer7_extracted.txt
 
 # Layer 7 storage (SQLite dev database — contains identity-linked session data)
 data/
+
+# Layer 4 identity registry — BIOMETRIC DATA. Never commit.
+# FAISS index + UUID/name sidecar. Separate from models/ (which holds
+# re-downloadable model weights); this data is irreplaceable and personal.
+faces/

@@ -111,6 +111,11 @@ class FaceEmbedder:
         self.model_pack = model_pack
         self.det_size = det_size
 
+        # Embedding failures are silent by design (identity must never crash
+        # the pipeline) — but silence is how the SCRFD-context bug survived a
+        # demo and a full audit. Warn once so it can never hide again.
+        self._embed_warned = False
+
         print(f"  [Layer4-Embedder] Loading InsightFace model pack: {model_pack}")
         print(f"  [Layer4-Embedder] Root       : {_INSIGHTFACE_ROOT}")
         print(f"  [Layer4-Embedder] Device ID  : {self._device_id} "
@@ -175,41 +180,58 @@ class FaceEmbedder:
         if h < MIN_CROP_SIZE or w < MIN_CROP_SIZE:
             return None, None
 
+        # ── Restore scene context before detection ───────────────────────────
+        # SCRFD is trained on scenes where a face occupies a FRACTION of the
+        # frame. Layer 3's crop is padded only CROP_PADDING_RATIO (15%), so the
+        # face fills it almost entirely — which is out of distribution, and
+        # detection returns zero faces on a perfectly clear face. Padding the
+        # crop back out with a replicated border restores the framing SCRFD
+        # expects. Measured on a real 229x256 crop (YOLO conf 0.90):
+        #     tight crop        -> 0 faces          -> no identity at all
+        #     crop + 50% border -> 1 face, 0.76     -> matches at 0.77
+        # The bordered embedding agrees with a full-frame embedding of the same
+        # face at cosine 0.93-0.99, so identity quality is unaffected.
+        # NOTE: face.kps land in `padded` coordinates, so alignment below must
+        # warp from `padded` — not from the original crop.
+        padded = cv2.copyMakeBorder(
+            face_crop, h // 2, h // 2, w // 2, w // 2, cv2.BORDER_REPLICATE
+        )
+
         try:
-            faces = self._app.get(face_crop)
-        except Exception:
+            faces = self._app.get(padded)
+        except Exception as e:
+            self._warn_once(f"InsightFace raised {type(e).__name__}: {e}")
             return None, None
 
         if not faces:
-            # InsightFace found no face in the crop.
-            # Fall back: try on a slightly larger version of the crop.
-            try:
-                upscaled = cv2.resize(face_crop, (max(w, 160), max(h, 160)))
-                faces = self._app.get(upscaled)
-            except Exception:
-                return None, None
-
-        if not faces:
+            self._warn_once(
+                "InsightFace found no face in a crop that Layer 3 detected. "
+                "Check crop framing/quality."
+            )
             return None, None
 
         # Use the highest-confidence detection from InsightFace
         face = max(faces, key=lambda f: f.det_score)
 
         embedding = face.normed_embedding  # shape (512,), already L2-normalised
-        aligned_face = face.normed_embedding  # placeholder
 
-        # Extract aligned 112x112 crop via warp (stored in face object)
-        # InsightFace stores this internally; we recompute via get_feat if needed.
-        # The aligned BGR crop can be accessed via the face's aligned attribute
-        # when using the app pipeline — fall back to a resized crop if absent.
+        # Aligned 112x112 warp, for debugging/audit display only — the
+        # embedding above already comes from this alignment internally.
         try:
-            aligned_face = self._get_aligned_face(face_crop, face)
+            aligned_face = self._get_aligned_face(padded, face)
         except Exception:
             aligned_face = cv2.resize(face_crop, (112, 112))
 
         return embedding.astype(np.float32), aligned_face
 
     # ─── Internal ─────────────────────────────────────────────────────────────
+
+    def _warn_once(self, msg: str):
+        """Print an embedding-failure warning the first time only."""
+        if not self._embed_warned:
+            self._embed_warned = True
+            print(f"  [Layer4-Embedder] WARNING: {msg} "
+                  f"Faces will show 'no-embed'. Further warnings suppressed.")
 
     def _get_aligned_face(self, frame: np.ndarray, face) -> np.ndarray:
         """
