@@ -41,6 +41,7 @@ from src.layer1_ingestion.capture import VideoCapture
 from src.layer2_preprocessing.preprocessor import Preprocessor
 from src.layer3_detection.detector import FaceDetector, DEFAULT_MODEL_PATH
 from src.layer4_identity.identifier import FaceIdentifier
+from src.layer4_identity.identity_store import DEFAULT_STORE_PATH
 
 # ─── Drawing constants ────────────────────────────────────────────────────────
 
@@ -81,7 +82,7 @@ class Layer4ValidationPipeline:
         source,
         model_path: str = DEFAULT_MODEL_PATH,
         confidence_threshold: float = 0.5,
-        store_path: str = "models/identity_store",
+        store_path: str = DEFAULT_STORE_PATH,
         output_dir: str = "output",
         camera_id: str = "validation_l4"
     ):

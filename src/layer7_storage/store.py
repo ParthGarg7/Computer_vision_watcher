@@ -19,7 +19,7 @@ Backend: SQLite (development substitute for PostgreSQL + TimescaleDB)
         presence_events    →  TimescaleDB `presence_events` hypertable
 
     FAISS embedding persistence (the fourth Layer 7 store) already lives in
-    Layer 4's IdentityStore (models/identity_store.*) — write_index /
+    Layer 4's IdentityStore (faces/db/identity_store.*) — write_index /
     read_index per the Architecture Doc Section 4.3. Redis (active session
     cache) is optional at MVP and not used; Layer 6 keeps active-session
     state in-process instead.

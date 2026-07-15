@@ -201,7 +201,8 @@ _C = {
     "track_bg":   (200, 100, 0),    # Orange — track ID background
     "track_txt":  (255, 255, 255),  # White
     "known_bg":   (120, 0, 180),    # Purple — known identity
-    "unknown_bg": (60, 60, 60),     # Dark grey — unknown
+    "unknown_bg": (60, 60, 60),     # Dark grey — embedded but unrecognised
+    "fail_bg":    (0, 0, 200),      # Red — embedding failed (loud on purpose)
     "id_txt":     (255, 255, 255),  # White
     "expr_bg":    (0, 130, 180),    # Teal — expression
     "expr_txt":   (255, 255, 255),  # White
@@ -257,21 +258,32 @@ def draw_all_detections(
                                   _C["track_bg"], _C["track_txt"])
 
         # ── Identity label (Layer 4) ──────────────────────────────────────
+        # Three distinct, ALWAYS-VISIBLE states. The identity label is never
+        # blank: rendering a failure as silence is indistinguishable from
+        # "working fine", which is exactly how the SCRFD-context bug survived
+        # a live demo and a full audit. Loud and ugly beats invisible.
+        #   purple  Parth (0.77)  — recognised
+        #   grey    unknown (0.32)— embedded, no match above threshold
+        #   red     no-embed      — InsightFace found no face in the crop
         if enable_identity:
             if det.is_known and det.identity_label:
-                score_txt = f"{det.similarity_score:.2f}" if det.similarity_score else ""
+                # `is not None` — a real score of 0.0 is falsy and must not
+                # be mistaken for "missing".
+                score_txt = (f"{det.similarity_score:.2f}"
+                             if det.similarity_score is not None else "")
                 id_txt = f"{det.identity_label} ({score_txt})"
                 bg = _C["known_bg"]
             elif det.embedding is not None:
-                score_txt = f"{det.similarity_score:.2f}" if det.similarity_score else "0.00"
+                score_txt = (f"{det.similarity_score:.2f}"
+                             if det.similarity_score is not None else "0.00")
                 id_txt = f"unknown ({score_txt})"
                 bg = _C["unknown_bg"]
             else:
-                id_txt = None
+                id_txt = "no-embed"
+                bg = _C["fail_bg"]
 
-            if id_txt:
-                label_y = _put_label(display, id_txt, x1, label_y,
-                                      bg, _C["id_txt"])
+            label_y = _put_label(display, id_txt, x1, label_y,
+                                  bg, _C["id_txt"])
 
         # ── Expression (Layer 5) ──────────────────────────────────
         # Only show expression if confidence meets minimum threshold.

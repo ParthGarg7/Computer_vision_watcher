@@ -25,12 +25,11 @@ Ref: Layer 4 Architecture Doc — Sections 2, 3, 10
 
 from src.core.frame_context import FrameContext
 from src.layer4_identity.embedder import FaceEmbedder
-from src.layer4_identity.identity_store import IdentityStore
+from src.layer4_identity.identity_store import IdentityStore, DEFAULT_STORE_PATH
 from src.layer4_identity.tracker import FaceTracker
 
 # ─── Defaults ────────────────────────────────────────────────────────────────
 
-DEFAULT_STORE_PATH = "models/identity_store"
 DEFAULT_CONFIDENCE = 0.5   # Only pass detections with >= this score to tracker
 
 

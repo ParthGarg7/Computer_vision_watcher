@@ -23,6 +23,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from src.layer4_identity.validator import Layer4ValidationPipeline
+from src.layer4_identity.identity_store import DEFAULT_STORE_PATH
 
 
 def main():
@@ -31,7 +32,7 @@ def main():
     )
     parser.add_argument("--source", type=str, default="0",
                         help="Source: '0' for webcam, path to video, or rtsp:// URL")
-    parser.add_argument("--store", type=str, default="models/identity_store",
+    parser.add_argument("--store", type=str, default=DEFAULT_STORE_PATH,
                         help="Base path for FAISS identity store")
     parser.add_argument("--max-frames", type=int, default=None,
                         help="Maximum frames to process (useful for quick test)")
