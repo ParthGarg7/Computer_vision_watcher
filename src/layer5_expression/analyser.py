@@ -238,12 +238,16 @@ class ExpressionAnalyser:
             self._frame_counter[gate_key] = count + 1
 
             if count % self.every_n_frames != 0:
-                # Throttled — carry forward last known result if available
+                # Throttled — carry forward last known result if available.
+                # expression_is_fresh stays False: the label is drawn every
+                # frame (no flicker) but downstream layers must not record
+                # this as a new measurement.
                 if track_id is not None and track_id in self._last_known:
                     last = self._last_known[track_id]
                     det.expression_scores = last["expression_scores"]
                     det.dominant_expression = last["dominant_expression"]
                     det.expression_confidence = last["expression_confidence"]
+                    det.expression_is_fresh = False
                 continue
 
             # ── Run expression inference ──────────────────────────────────────
@@ -278,6 +282,7 @@ class ExpressionAnalyser:
             det.expression_scores = smoothed_scores
             det.dominant_expression = dominant
             det.expression_confidence = confidence
+            det.expression_is_fresh = True   # inference genuinely ran here
 
             # Store for carry-forward on throttled frames
             if track_id is not None:

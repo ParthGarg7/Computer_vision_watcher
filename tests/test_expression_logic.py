@@ -57,6 +57,7 @@ class FakeDet:
         self.expression_scores = None
         self.dominant_expression = None
         self.expression_confidence = None
+        self.expression_is_fresh = False
 
 
 class FakeCtx:
@@ -114,6 +115,32 @@ class ExpressionLogicTests(unittest.TestCase):
         det = FakeDet(1, crop())
         a.analyse(FakeCtx([det]))                      # frame 1: throttled
         self.assertEqual(det.dominant_expression, "neutral")  # carried
+
+    def test_freshness_flag_marks_only_real_inferences(self):
+        # Without this flag, Layer 6 recorded one measurement N times:
+        # inflated dominant_counts, an N-fold larger events table, and a
+        # trend window full of duplicates.
+        a = make_analyser(NEUTRAL_PROBS, every_n_frames=5)
+        fresh_flags = []
+        for _ in range(10):
+            det = FakeDet(1, crop())
+            a.analyse(FakeCtx([det]))
+            fresh_flags.append(det.expression_is_fresh)
+        # Frames 0 and 5 ran inference; the rest carried forward
+        self.assertEqual(fresh_flags,
+                         [True, False, False, False, False,
+                          True, False, False, False, False])
+        self.assertEqual(a._model.calls, 2)
+
+    def test_carried_forward_detection_still_has_label_for_display(self):
+        # Freshness must NOT blank the label — the UI draws every frame.
+        a = make_analyser(NEUTRAL_PROBS, every_n_frames=5)
+        a.analyse(FakeCtx([FakeDet(1, crop())]))
+        det = FakeDet(1, crop())
+        a.analyse(FakeCtx([det]))
+        self.assertFalse(det.expression_is_fresh)
+        self.assertIsNotNone(det.expression_scores)
+        self.assertEqual(det.dominant_expression, "neutral")
 
     def test_untracked_detection_skipped(self):
         a = make_analyser(NEUTRAL_PROBS, every_n_frames=1)
