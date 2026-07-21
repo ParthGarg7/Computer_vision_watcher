@@ -53,9 +53,28 @@ _INSIGHTFACE_ROOT = os.environ.get(
 # Model pack — buffalo_l is the MVP default (ResNet-50, 99.83% LFW).
 DEFAULT_MODEL_PACK = "buffalo_l"
 
-# Input image size expected by InsightFace's detector.
-# det_size is the resolution at which SCRFD runs — 640x640 is the standard.
-DEFAULT_DET_SIZE = (640, 640)
+# Resolution at which SCRFD runs. 640x640 is InsightFace's standard for
+# whole scenes; this pipeline feeds it a single padded face crop (~200x210
+# on average), so that much detection resolution is wasted work.
+#
+# Measured over 120 real crops from webcam footage:
+#     det_size    ms/face   embedded   mean identity score
+#     (640,640)    15.64      99/120         0.802
+#     (480,480)    12.33      99/120           -
+#     (320,320)    10.80      99/120         0.801   <- 31% faster, same result
+#     (256,256)    15.04      95/120           -     <- slower AND worse
+#     (160,160)    15.44      64/120           -
+#
+# 320 is the sweet spot; below it SCRFD starts missing faces and gets slower.
+# Identity accuracy is unchanged (0.801 vs 0.802 mean, same success rate).
+#
+# NOTE: this default is tuned for CROPS. Callers that pass a whole photo —
+# scripts/register_face.py — should pass det_size=(640, 640) explicitly, or
+# a small face in a large image may go undetected.
+DEFAULT_DET_SIZE = (320, 320)
+
+# Detection resolution for whole images rather than face crops.
+FULL_IMAGE_DET_SIZE = (640, 640)
 
 # Minimum face crop dimension (H or W) below which embedding is skipped.
 # Crops smaller than this produce unreliable embeddings.
