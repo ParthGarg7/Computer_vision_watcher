@@ -57,6 +57,7 @@ from typing import Optional
 
 from src.core.frame_context import FrameContext
 from src.core.gpu_setup import register_nvidia_dlls, cuda_is_usable
+from src.layer5_expression import mood as mood_module
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -74,7 +75,13 @@ MIN_CROP_SIZE = 64
 #                                Strong disgust/fear bias on natural resting faces.
 #   'enet_b0_8_best_vgaf'      — EfficientNet-B0, trained on VGAF (real-world video)
 #                                Better on natural/non-acted faces. Default.
-#   'enet_b0_8_va_mtl'         — Multi-task learning variant (valence+arousal)
+#   'enet_b0_8_va_mtl'         — Multi-task variant. DEFAULT. Outputs the same
+#                                8 classes PLUS valence and arousal, which the
+#                                8-class models cannot provide at all (see
+#                                mood.py). Measured against b0_vgaf on 57 real
+#                                webcam crops: 75% identical labels, higher
+#                                mean confidence (0.627 vs 0.590), and FASTER
+#                                (13.5ms vs 16.3ms per face).
 #   'enet_b2_8'                — EfficientNet-B2. DO NOT USE: despite its higher
 #                                published AffectNet score, the ONNX export is
 #                                miscalibrated with this package's preprocessing.
@@ -82,7 +89,10 @@ MIN_CROP_SIZE = 64
 #                                Happiness at 0.98-0.999, b2_8 gives a flat
 #                                ~0.33-0.37 max (reads as "uncertain") and
 #                                sometimes the wrong class outright.
-DEFAULT_MODEL = "enet_b0_8_best_vgaf"
+#
+# Pass model_name='enet_b0_8_best_vgaf' to revert to the pure 8-class model;
+# everything still works, valence/arousal/mood simply stay None.
+DEFAULT_MODEL = "enet_b0_8_va_mtl"
 
 # Number of past analyses to smooth over per track_id.
 # Averaging probabilities across frames reduces single-frame wrong labels.
@@ -150,6 +160,10 @@ class ExpressionAnalyser:
         # single-frame wrong predictions (e.g. one frame of fear mid-smile).
         self._score_buffer: dict = {}
 
+        # Same smoothing for the dimensional outputs:
+        # track_id → list of recent (valence, arousal) pairs.
+        self._va_buffer: dict = {}
+
         # Register CUDA DLLs before any session is created, then check
         # whether CUDA is genuinely usable (get_available_providers() lists
         # CUDA whenever onnxruntime-gpu is installed, even when session
@@ -164,6 +178,11 @@ class ExpressionAnalyser:
         print(f"  [Layer5] Loading expression model: {model_name}")
         print(f"  [Layer5] ONNX execution provider  : "
               f"{'CUDA (GPU)' if _cuda_available else 'CPU'}")
+        # hsemotion_onnx does `import urllib` then calls urllib.request.* when
+        # downloading weights on first run — which only works if something
+        # else already imported the submodule. Import it here so the very
+        # first launch on a clean machine doesn't crash with AttributeError.
+        import urllib.request  # noqa: F401
         from hsemotion_onnx.facial_emotions import HSEmotionRecognizer
         self._model = HSEmotionRecognizer(model_name=model_name)
 
@@ -247,11 +266,15 @@ class ExpressionAnalyser:
                     det.expression_scores = last["expression_scores"]
                     det.dominant_expression = last["dominant_expression"]
                     det.expression_confidence = last["expression_confidence"]
+                    det.valence = last["valence"]
+                    det.arousal = last["arousal"]
+                    det.mood = last["mood"]
                     det.expression_is_fresh = False
                 continue
 
             # ── Run expression inference ──────────────────────────────────────
-            scores, dominant, confidence = self._run_inference(face_crop)
+            scores, dominant, confidence, valence, arousal = \
+                self._run_inference(face_crop)
 
             if scores is None:
                 continue
@@ -262,6 +285,17 @@ class ExpressionAnalyser:
             if gate_key not in self._score_buffer:
                 self._score_buffer[gate_key] = []
             self._score_buffer[gate_key].append(scores)
+
+            # Smooth valence/arousal over the same window. A single frame's
+            # dimensional reading is as noisy as a single class probability,
+            # and an unsmoothed value makes the mood label flicker between
+            # quadrants whenever it sits near a boundary.
+            if valence is not None:
+                buf = self._va_buffer.setdefault(gate_key, [])
+                buf.append((valence, arousal))
+                del buf[:-SMOOTHING_WINDOW]
+                valence = float(np.mean([v for v, _ in buf]))
+                arousal = float(np.mean([a for _, a in buf]))
             # Keep only the last SMOOTHING_WINDOW entries
             self._score_buffer[gate_key] = \
                 self._score_buffer[gate_key][-SMOOTHING_WINDOW:]
@@ -279,9 +313,17 @@ class ExpressionAnalyser:
             dominant = max(smoothed_scores, key=smoothed_scores.get)
             confidence = smoothed_scores[dominant]
 
+            # Named state from valence/arousal, or from a custom rule
+            # (src/layer5_expression/mood.py). None for 8-class models with
+            # no matching custom rule.
+            mood = mood_module.resolve_mood(smoothed_scores, valence, arousal)
+
             det.expression_scores = smoothed_scores
             det.dominant_expression = dominant
             det.expression_confidence = confidence
+            det.valence = valence
+            det.arousal = arousal
+            det.mood = mood
             det.expression_is_fresh = True   # inference genuinely ran here
 
             # Store for carry-forward on throttled frames
@@ -290,6 +332,9 @@ class ExpressionAnalyser:
                     "expression_scores": smoothed_scores,
                     "dominant_expression": dominant,
                     "expression_confidence": confidence,
+                    "valence": valence,
+                    "arousal": arousal,
+                    "mood": mood,
                 }
 
         return ctx
@@ -311,6 +356,7 @@ class ExpressionAnalyser:
             self._frame_counter.pop(k, None)
             self._last_known.pop(k, None)
             self._score_buffer.pop(k, None)
+            self._va_buffer.pop(k, None)
 
     # ─── Internal ─────────────────────────────────────────────────────────────
 
@@ -395,8 +441,9 @@ class ExpressionAnalyser:
         The crop is converted to RGB before inference: hsemotion's preprocess
         normalises channels with ImageNet RGB statistics, so feeding OpenCV's
         native BGR order swaps the red/blue channels and degrades accuracy.
-        Returns (expression_scores_dict, dominant_expression, confidence).
-        Returns (None, None, None) on any failure.
+        Returns (scores_dict, dominant_expression, confidence, valence,
+        arousal). valence/arousal are None for the plain 8-class models.
+        Returns (None, None, None, None, None) on any failure.
 
         Parameters
         ----------
@@ -404,8 +451,9 @@ class ExpressionAnalyser:
 
         Returns
         -------
-        (dict, str, float) or (None, None, None)
+        (dict, str, float, float|None, float|None) or all-None
         """
+        FAIL = (None, None, None, None, None)
         try:
             # No CLAHE / histogram equalisation here: the model was trained on
             # natural (unequalised) AffectNet images, so contrast manipulation
@@ -422,20 +470,26 @@ class ExpressionAnalyser:
             )
 
             if probs is None or len(probs) == 0:
-                return None, None, None
+                return FAIL
 
             probs = np.asarray(probs, dtype=np.float32)
 
-            # MTL variants append 2 extra outputs (valence, arousal) after the
-            # emotion logits — keep only the emotion class probabilities.
-            probs = probs[:len(self._class_names)]
+            # MTL variants append 2 extra outputs — valence then arousal —
+            # after the emotion logits. Capture them before slicing, so the
+            # class probabilities below stay a clean 8-way distribution.
+            n_classes = len(self._class_names)
+            valence = arousal = None
+            if len(probs) >= n_classes + 2:
+                valence = float(probs[n_classes])
+                arousal = float(probs[n_classes + 1])
+            probs = probs[:n_classes]
 
             # Build probability dict — class names to probability values
             # Normalise to sum=1.0 (model output should already be softmax,
             # but we normalise defensively).
             probs_sum = float(probs.sum())
             if probs_sum < 1e-6:
-                return None, None, None
+                return FAIL
             probs_norm = probs / probs_sum
 
             # Map to class names using the model's own index→class order
@@ -447,7 +501,7 @@ class ExpressionAnalyser:
             dominant = max(scores, key=scores.get)
             confidence = scores[dominant]
 
-            return scores, dominant, confidence
+            return scores, dominant, confidence, valence, arousal
 
         except Exception as e:
             # Graceful fallback — expression failure should never crash the
@@ -456,4 +510,4 @@ class ExpressionAnalyser:
                 self._inference_error_reported = True
                 print(f"  [Layer5] WARNING: expression inference failed "
                       f"({type(e).__name__}: {e}). Further errors suppressed.")
-            return None, None, None
+            return FAIL

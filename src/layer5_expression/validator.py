@@ -149,6 +149,7 @@ class Layer5ValidationPipeline:
             annotated, detections,
             show_track=True,
             show_expression=True,
+            show_mood=True,
             show_bars=True,
             expression_placeholder=True,
         )
