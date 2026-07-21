@@ -59,7 +59,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from src.layer4_identity.embedder import FaceEmbedder
+from src.layer4_identity.embedder import FaceEmbedder, FULL_IMAGE_DET_SIZE
 from src.layer4_identity.identity_store import IdentityStore, DEFAULT_STORE_PATH
 
 # ─── Constants ────────────────────────────────────────────────────────────────
@@ -486,7 +486,10 @@ def main():
         sys.exit(1)
 
     print("  Loading InsightFace embedding model (first run downloads weights)...")
-    embedder = FaceEmbedder()
+    # Registration passes WHOLE photos, not the small crops Layer 3 produces,
+    # so it needs the full detection resolution — otherwise a small face in a
+    # large image can be missed entirely.
+    embedder = FaceEmbedder(det_size=FULL_IMAGE_DET_SIZE)
 
     if args.add_new:
         cmd_add_new(args, embedder, store)
