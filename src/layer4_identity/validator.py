@@ -37,6 +37,7 @@ import numpy as np
 import os
 import time
 
+from src.core import drawing
 from src.layer1_ingestion.capture import VideoCapture
 from src.layer2_preprocessing.preprocessor import Preprocessor
 from src.layer3_detection.detector import FaceDetector, DEFAULT_MODEL_PATH
@@ -137,58 +138,18 @@ class Layer4ValidationPipeline:
         """
         annotated = frame.copy()
 
-        for det in detections:
-            x1, y1, x2, y2 = [int(v) for v in det.bbox_original]
-            h, w = frame.shape[:2]
-            x1, y1 = max(0, x1), max(0, y1)
-            x2, y2 = min(w - 1, x2), min(h - 1, y2)
-
-            # Bounding box
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), BOX_COLOR, BOX_THICKNESS)
-
-            label_y = y1  # current y cursor for stacking labels above the box
-
-            # ── Track ID label ────────────────────────────────────────────────
-            if det.track_id is not None:
-                tid_text = f"ID:{det.track_id}"
-            else:
-                tid_text = "ID:?"  # tentative / unconfirmed track
-
-            (tw, th), base = cv2.getTextSize(tid_text, FONT, FONT_SCALE_LABEL, TEXT_THICKNESS)
-            ty_top = max(0, label_y - th - base - 6)
-            cv2.rectangle(annotated, (x1, ty_top), (x1 + tw + 6, label_y), TRACK_ID_BG_COLOR, -1)
-            cv2.putText(annotated, tid_text, (x1 + 3, label_y - base - 2),
-                        FONT, FONT_SCALE_LABEL, TRACK_ID_TEXT_COLOR, TEXT_THICKNESS)
-            label_y = ty_top
-
-            # ── Identity label ─────────────────────────────────────────────────
-            if det.is_known and det.identity_label:
-                id_text = det.identity_label
-                score_text = f"{det.similarity_score:.2f}" if det.similarity_score else ""
-                bg_color = IDENTITY_BG_COLOR
-            else:
-                id_text = "unknown"
-                score_text = f"{det.similarity_score:.2f}" if det.similarity_score else "0.00"
-                bg_color = UNKNOWN_BG_COLOR
-
-            full_label = f"{id_text} ({score_text})" if score_text else id_text
-            (iw, ih), ibase = cv2.getTextSize(full_label, FONT, FONT_SCALE_LABEL, TEXT_THICKNESS)
-            iy_top = max(0, label_y - ih - ibase - 6)
-            cv2.rectangle(annotated, (x1, iy_top), (x1 + iw + 6, label_y), bg_color, -1)
-            cv2.putText(annotated, full_label, (x1 + 3, label_y - ibase - 2),
-                        FONT, FONT_SCALE_LABEL, IDENTITY_TEXT_COLOR, TEXT_THICKNESS)
-
-        # HUD overlay
-        hud = (f"Frame: {frame_seq:05d}  |  Faces: {n_faces}  |  "
-               f"Tracked: {n_tracked}")
-        cv2.putText(annotated, hud, (10, 28), FONT, FONT_SCALE_HUD, HUD_COLOR, 2)
-
-        # Hint
-        cv2.putText(
-            annotated, "Q: Quit  |  F: Fullscreen",
-            (10, annotated.shape[0] - 10),
-            FONT, FONT_SCALE_HINT, HINT_COLOR, TEXT_THICKNESS
+        # track_placeholder: this validator exists to inspect tracking, so
+        # unconfirmed tracks are shown as "ID:?" rather than left unlabelled.
+        drawing.draw_detections(
+            annotated, detections,
+            show_track=True,
+            show_identity=True,
+            track_placeholder=True,
         )
+        drawing.draw_hud(annotated,
+                         f"Frame: {frame_seq:05d}  |  Faces: {n_faces}  |  "
+                         f"Tracked: {n_tracked}")
+        drawing.draw_hint(annotated)
         return annotated
 
     # ─── Main Run ─────────────────────────────────────────────────────────────
