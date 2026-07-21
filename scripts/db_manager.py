@@ -13,6 +13,8 @@ The database holds three tables:
     presence_events    — one row per arrival/departure (the log)
 
 VIEW
+    python scripts/db_manager.py --dump            # EVERY table, every row
+    python scripts/db_manager.py --dump 50         # ...capped at 50 rows/table
     python scripts/db_manager.py --stats
     python scripts/db_manager.py --sessions 20
     python scripts/db_manager.py --events 20
@@ -243,6 +245,21 @@ def cmd_person(conn, name):
     print()
 
 
+def _print_table(cols, rows, max_col_width=28):
+    """Render rows as an aligned text table."""
+    if not rows:
+        print("  (no rows)\n")
+        return
+    widths = [max(len(c), *(len(str(r[i])) for r in rows))
+              for i, c in enumerate(cols)]
+    widths = [min(w, max_col_width) for w in widths]
+    print("  " + " | ".join(c[:w].ljust(w) for c, w in zip(cols, widths)))
+    print("  " + "-+-".join("-" * w for w in widths))
+    for r in rows:
+        print("  " + " | ".join(str(r[i])[:w].ljust(w) for i, w in enumerate(widths)))
+    print(f"\n  {len(rows)} row(s)\n")
+
+
 def cmd_query(conn, sql):
     print(f"  ── QUERY ──\n  {sql}\n")
     try:
@@ -255,17 +272,34 @@ def cmd_query(conn, sql):
         conn.commit()
         print(f"  OK. Rows affected: {cur.rowcount}\n")
         return
-    if not rows:
-        print("  (no rows)\n")
-        return
-    cols = [d[0] for d in cur.description]
-    widths = [max(len(c), *(len(str(r[i])) for r in rows)) for i, c in enumerate(cols)]
-    widths = [min(w, 30) for w in widths]
-    print("  " + " | ".join(c[:w].ljust(w) for c, w in zip(cols, widths)))
-    print("  " + "-+-".join("-" * w for w in widths))
-    for r in rows:
-        print("  " + " | ".join(str(r[i])[:w].ljust(w) for i, w in enumerate(widths)))
-    print(f"\n  {len(rows)} row(s)\n")
+    _print_table([d[0] for d in cur.description], rows)
+
+
+def cmd_dump(conn, limit):
+    """Print EVERY table with its rows — the whole database in one command."""
+    total = 0
+    for t in TABLES:
+        try:
+            n = conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+        except sqlite3.OperationalError:
+            print(f"  ── {t.upper()} — table missing ──\n")
+            continue
+        total += n
+        shown = f"all {n}" if limit is None else f"latest {min(limit, n)} of {n}"
+        print(f"  {'='*74}")
+        print(f"  TABLE: {t}   ({shown} rows)")
+        print(f"  {'='*74}\n")
+        order = "session_end DESC" if t == "sessions" else "id DESC"
+        sql = f"SELECT * FROM {t} ORDER BY {order}"
+        if limit is not None:
+            sql += f" LIMIT {int(limit)}"
+        cur = conn.execute(sql)
+        _print_table([d[0] for d in cur.description], cur.fetchall())
+    print(f"  {total} rows across {len(TABLES)} tables.")
+    if limit is None and total > 2000:
+        print(f"  Tip: that's a lot of output — use '--dump 50' to cap rows per")
+        print(f"       table, or '--export-csv out/' to write files instead.")
+    print()
 
 
 # ─── Add commands ─────────────────────────────────────────────────────────────
@@ -432,6 +466,9 @@ def build_parser() -> argparse.ArgumentParser:
     m = p.add_mutually_exclusive_group(required=True)
     # view
     m.add_argument("--stats", action="store_true", help="Overview: tables, sizes, people")
+    m.add_argument("--dump", nargs="?", type=int, const=None, default=argparse.SUPPRESS,
+                   metavar="N",
+                   help="Show EVERY table with all rows. '--dump N' caps rows per table.")
     m.add_argument("--sessions", nargs="?", type=int, const=15, metavar="N",
                    help="List the N most recent sessions (default 15)")
     m.add_argument("--events", nargs="?", type=int, const=15, metavar="N",
@@ -477,7 +514,8 @@ def main():
     print_banner()
     conn = connect(args.db)
     try:
-        if args.stats:                 cmd_stats(conn, args.db)
+        if hasattr(args, "dump"):      cmd_dump(conn, args.dump)
+        elif args.stats:               cmd_stats(conn, args.db)
         elif args.sessions is not None: cmd_sessions(conn, args.sessions)
         elif args.events is not None:   cmd_events(conn, args.events)
         elif args.presence is not None: cmd_presence(conn, args.presence)
