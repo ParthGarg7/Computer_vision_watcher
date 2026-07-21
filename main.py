@@ -523,10 +523,11 @@ def run_pipeline(
             if output_path:
                 print(f"  Annotated video saved → {output_path}")
         if aggregator is not None:
-            aggregator.close()  # finalize still-open sessions → Layer 7
+            aggregator.close()  # close appearances + finalise sessions → L7
         if storage is not None:
             storage.close()
             print(f"\n  [Layer7] Persisted: {storage.n_sessions} sessions, "
+                  f"{storage.n_appearances} appearances, "
                   f"{storage.n_expression_events} expression events, "
                   f"{storage.n_presence_events} presence events "
                   f"→ {storage.db_path}")
