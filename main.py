@@ -45,6 +45,8 @@ import cv2
 import numpy as np
 import torch
 
+from src.core import drawing
+
 os.environ["YOLO_VERBOSE"] = "False"
 
 
@@ -193,36 +195,9 @@ def _select_rtsp() -> tuple:
     return url, cam_id
 
 
-# ─── Drawing helpers ──────────────────────────────────────────────────────────
-
-# Color palette (BGR)
-_C = {
-    "box":        (0, 220, 80),     # Green — bounding box
-    "track_bg":   (200, 100, 0),    # Orange — track ID background
-    "track_txt":  (255, 255, 255),  # White
-    "known_bg":   (120, 0, 180),    # Purple — known identity
-    "unknown_bg": (60, 60, 60),     # Dark grey — embedded but unrecognised
-    "fail_bg":    (0, 0, 200),      # Red — embedding failed (loud on purpose)
-    "id_txt":     (255, 255, 255),  # White
-    "expr_bg":    (0, 130, 180),    # Teal — expression
-    "expr_txt":   (255, 255, 255),  # White
-    "hud":        (0, 220, 220),    # Cyan
-    "hint":       (160, 160, 160),  # Grey
-    "bar_bg":     (40, 40, 40),
-    "bar_fg":     (0, 200, 160),
-}
-_F = cv2.FONT_HERSHEY_SIMPLEX
-
-
-def _put_label(img, text, x, y_bottom, bg_color, text_color,
-               font_scale=0.52, thickness=1):
-    """Draw a filled-background text label. Returns y_top of the label."""
-    (tw, th), base = cv2.getTextSize(text, _F, font_scale, thickness)
-    y_top = max(0, y_bottom - th - base - 6)
-    cv2.rectangle(img, (x, y_top), (x + tw + 6, y_bottom), bg_color, -1)
-    cv2.putText(img, text, (x + 3, y_bottom - base - 2),
-                _F, font_scale, text_color, thickness)
-    return y_top
+# ─── Drawing ──────────────────────────────────────────────────────────────────
+# All overlay rendering lives in src/core/drawing.py, shared with the three
+# layer validators — see that module for the colour convention.
 
 
 def draw_all_detections(
@@ -234,102 +209,20 @@ def draw_all_detections(
     enable_expression: bool
 ) -> np.ndarray:
     """Draw all layer outputs onto the display frame."""
-    n_faces = len(detections)
-
-    for det in detections:
-        x1, y1, x2, y2 = [int(v) for v in det.bbox_original]
-        fh, fw = display.shape[:2]
-        x1, y1 = max(0, x1), max(0, y1)
-        x2, y2 = min(fw - 1, x2), min(fh - 1, y2)
-
-        cv2.rectangle(display, (x1, y1), (x2, y2), _C["box"], 2)
-
-        label_y = y1
-
-        # ── Confidence (Layer 3) ──────────────────────────────────────────
-        conf_txt = f"{det.confidence:.2f}"
-        label_y = _put_label(display, conf_txt, x1, label_y,
-                              (0, 180, 60), (255, 255, 255))
-
-        # ── Track ID (Layer 4) ────────────────────────────────────────────
-        if enable_identity and det.track_id is not None:
-            tid_txt = f"ID:{det.track_id}"
-            label_y = _put_label(display, tid_txt, x1, label_y,
-                                  _C["track_bg"], _C["track_txt"])
-
-        # ── Identity label (Layer 4) ──────────────────────────────────────
-        # Three distinct, ALWAYS-VISIBLE states. The identity label is never
-        # blank: rendering a failure as silence is indistinguishable from
-        # "working fine", which is exactly how the SCRFD-context bug survived
-        # a live demo and a full audit. Loud and ugly beats invisible.
-        #   purple  Parth (0.77)  — recognised
-        #   grey    unknown (0.32)— embedded, no match above threshold
-        #   red     no-embed      — InsightFace found no face in the crop
-        if enable_identity:
-            if det.is_known and det.identity_label:
-                # `is not None` — a real score of 0.0 is falsy and must not
-                # be mistaken for "missing".
-                score_txt = (f"{det.similarity_score:.2f}"
-                             if det.similarity_score is not None else "")
-                id_txt = f"{det.identity_label} ({score_txt})"
-                bg = _C["known_bg"]
-            elif det.embedding is not None:
-                score_txt = (f"{det.similarity_score:.2f}"
-                             if det.similarity_score is not None else "0.00")
-                id_txt = f"unknown ({score_txt})"
-                bg = _C["unknown_bg"]
-            else:
-                id_txt = "no-embed"
-                bg = _C["fail_bg"]
-
-            label_y = _put_label(display, id_txt, x1, label_y,
-                                  bg, _C["id_txt"])
-
-        # ── Expression (Layer 5) ──────────────────────────────────
-        # Only show expression if confidence meets minimum threshold.
-        # Below 0.35 the model is essentially guessing (8 classes = 12.5% random)
-        # and showing a wrong label is worse than showing nothing.
-        EXPR_MIN_CONFIDENCE = 0.35
-        if enable_expression and det.dominant_expression:
-            conf = det.expression_confidence or 0.0
-            if conf >= EXPR_MIN_CONFIDENCE:
-                expr_txt = f"{det.dominant_expression} {conf:.0%}"
-                expr_bg = _C["expr_bg"]
-            else:
-                expr_txt = f"uncertain {conf:.0%}"
-                expr_bg = (60, 60, 60)  # dark grey for low-confidence
-            _put_label(display, expr_txt, x1, label_y,
-                       expr_bg, _C["expr_txt"])
-
-            # Probability bars (top-3)
-            if det.expression_scores:
-                top3 = sorted(det.expression_scores.items(),
-                               key=lambda kv: kv[1], reverse=True)[:3]
-                bx, by = x2 + 6, y1
-                bw, bh, gap = 80, 12, 2
-                for cls_name, prob in top3:
-                    if bx + bw + 35 > fw:
-                        break
-                    cv2.rectangle(display, (bx, by), (bx + bw, by + bh),
-                                  _C["bar_bg"], -1)
-                    cv2.rectangle(display, (bx, by),
-                                  (bx + int(bw * prob), by + bh),
-                                  _C["bar_fg"], -1)
-                    cv2.putText(display, f"{cls_name[:5]} {prob:.0%}",
-                                (bx + 2, by + bh - 2),
-                                _F, 0.34, (255, 255, 255), 1)
-                    by += bh + gap
-
-        # Landmarks (Layer 3, if available)
-        if det.landmarks_original:
-            for lx, ly, _ in det.landmarks_original:
-                cv2.circle(display, (int(lx), int(ly)), 4, (0, 120, 255), -1)
-
-    # HUD
-    hud = f"FPS: {display_fps:5.1f}  |  Faces: {n_faces}  |  Frame: {frame_seq}"
-    cv2.putText(display, hud, (10, 28), _F, 0.6, _C["hud"], 2)
-    cv2.putText(display, "Q: Quit  |  F: Fullscreen",
-                (10, display.shape[0] - 10), _F, 0.45, _C["hint"], 1)
+    drawing.draw_detections(
+        display, detections,
+        show_confidence=True,
+        show_track=enable_identity,
+        show_identity=enable_identity,
+        show_expression=enable_expression,
+        show_bars=enable_expression,
+        show_landmarks=True,
+    )
+    drawing.draw_hud(
+        display,
+        f"FPS: {display_fps:5.1f}  |  Faces: {len(detections)}  |  "
+        f"Frame: {frame_seq}")
+    drawing.draw_hint(display)
     return display
 
 

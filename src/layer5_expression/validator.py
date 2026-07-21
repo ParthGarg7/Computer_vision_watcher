@@ -35,6 +35,7 @@ import numpy as np
 import os
 import time
 
+from src.core import drawing
 from src.layer1_ingestion.capture import VideoCapture
 from src.layer2_preprocessing.preprocessor import Preprocessor
 from src.layer3_detection.detector import FaceDetector, DEFAULT_MODEL_PATH
@@ -141,88 +142,19 @@ class Layer5ValidationPipeline:
         """
         annotated = frame.copy()
 
-        for det in detections:
-            x1, y1, x2, y2 = [int(v) for v in det.bbox_original]
-            fh, fw = frame.shape[:2]
-            x1, y1 = max(0, x1), max(0, y1)
-            x2, y2 = min(fw - 1, x2), min(fh - 1, y2)
-
-            # Bounding box
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), BOX_COLOR, BOX_THICKNESS)
-
-            label_y = y1  # cursor for stacking labels above box
-
-            # ── Track ID ──────────────────────────────────────────────────────
-            if det.track_id is not None:
-                tid = f"ID:{det.track_id}"
-                (tw, th), tb = cv2.getTextSize(tid, FONT, FONT_SCALE_LABEL, TEXT_THICKNESS)
-                ty = max(0, label_y - th - tb - 6)
-                cv2.rectangle(annotated, (x1, ty), (x1 + tw + 6, label_y), (200, 100, 0), -1)
-                cv2.putText(annotated, tid, (x1 + 3, label_y - tb - 2),
-                            FONT, FONT_SCALE_LABEL, (255, 255, 255), TEXT_THICKNESS)
-                label_y = ty
-
-            # ── Dominant expression label ─────────────────────────────────────
-            if det.dominant_expression:
-                expr_label = (
-                    f"{det.dominant_expression} "
-                    f"{det.expression_confidence:.0%}"
-                    if det.expression_confidence else det.dominant_expression
-                )
-            else:
-                expr_label = "analysing..."
-
-            (ew, eh), eb = cv2.getTextSize(expr_label, FONT, FONT_SCALE_LABEL, TEXT_THICKNESS)
-            ey = max(0, label_y - eh - eb - 6)
-            cv2.rectangle(annotated, (x1, ey), (x1 + ew + 6, label_y), EXPR_BG_COLOR, -1)
-            cv2.putText(annotated, expr_label, (x1 + 3, label_y - eb - 2),
-                        FONT, FONT_SCALE_LABEL, EXPR_TEXT_COLOR, TEXT_THICKNESS)
-
-            # ── Probability bars (top-N classes) ──────────────────────────────
-            if det.expression_scores:
-                top_classes = sorted(
-                    det.expression_scores.items(),
-                    key=lambda kv: kv[1],
-                    reverse=True
-                )[:TOP_N_CLASSES]
-
-                bar_x = x2 + 6
-                bar_y = y1
-                bar_w = 90
-                bar_h = 14
-                gap = 3
-
-                for cls_name, prob in top_classes:
-                    # Clip bar within frame
-                    if bar_x + bar_w + 40 > fw:
-                        break
-
-                    # Background bar
-                    cv2.rectangle(annotated,
-                                  (bar_x, bar_y),
-                                  (bar_x + bar_w, bar_y + bar_h),
-                                  BAR_BG_COLOR, -1)
-                    # Filled bar (proportional to probability)
-                    fill_w = int(bar_w * prob)
-                    cv2.rectangle(annotated,
-                                  (bar_x, bar_y),
-                                  (bar_x + fill_w, bar_y + bar_h),
-                                  BAR_FG_COLOR, -1)
-                    # Label
-                    bar_label = f"{cls_name[:6]} {prob:.0%}"
-                    cv2.putText(annotated, bar_label,
-                                (bar_x + 3, bar_y + bar_h - 3),
-                                FONT, FONT_SCALE_SMALL,
-                                (255, 255, 255), TEXT_THICKNESS)
-                    bar_y += bar_h + gap
-
-        # HUD overlay
-        hud = f"Frame: {frame_seq:05d}  |  Faces: {n_faces}"
-        cv2.putText(annotated, hud, (10, 28), FONT, FONT_SCALE_HUD, HUD_COLOR, 2)
-
-        cv2.putText(annotated, "Q: Quit  |  F: Fullscreen",
-                    (10, annotated.shape[0] - 10),
-                    FONT, FONT_SCALE_HINT, HINT_COLOR, TEXT_THICKNESS)
+        # expression_placeholder: this validator's review checklist expects
+        # "analysing..." on a track's first frames, before the throttle has
+        # produced a reading — it distinguishes "not yet" from "disabled".
+        drawing.draw_detections(
+            annotated, detections,
+            show_track=True,
+            show_expression=True,
+            show_bars=True,
+            expression_placeholder=True,
+        )
+        drawing.draw_hud(annotated,
+                         f"Frame: {frame_seq:05d}  |  Faces: {n_faces}")
+        drawing.draw_hint(annotated)
         return annotated
 
     # ─── Main Run ─────────────────────────────────────────────────────────────

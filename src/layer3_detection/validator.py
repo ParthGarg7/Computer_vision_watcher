@@ -35,6 +35,7 @@ import numpy as np
 import os
 import time
 
+from src.core import drawing
 from src.layer1_ingestion.capture import VideoCapture
 from src.layer2_preprocessing.preprocessor import Preprocessor
 from src.layer3_detection.detector import FaceDetector, DEFAULT_MODEL_PATH
@@ -130,57 +131,16 @@ class ValidationPipeline:
         """
         annotated = frame.copy()
 
-        for det in detections:
-            x1, y1, x2, y2 = [int(v) for v in det.bbox_original]
-
-            # Clamp to frame bounds (defensive — crop clamping should prevent this)
-            h, w = frame.shape[:2]
-            x1, y1 = max(0, x1), max(0, y1)
-            x2, y2 = min(w - 1, x2), min(h - 1, y2)
-
-            # Bounding box
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), BOX_COLOR, BOX_THICKNESS)
-
-            # Confidence label with filled background rectangle
-            label = f"{det.confidence:.2f}"
-            (lw, lh), baseline = cv2.getTextSize(label, FONT, FONT_SCALE_CONF, TEXT_THICKNESS)
-            label_y_top = max(0, y1 - lh - baseline - 6)
-            cv2.rectangle(
-                annotated,
-                (x1, label_y_top),
-                (x1 + lw + 6, y1),
-                CONF_BG_COLOR, -1
-            )
-            cv2.putText(
-                annotated, label,
-                (x1 + 3, y1 - baseline - 2),
-                FONT, FONT_SCALE_CONF, CONF_TEXT_COLOR, TEXT_THICKNESS
-            )
-
-            # Landmark dots (if available — checkpoint-dependent)
-            if det.landmarks_original:
-                for lx, ly, _lconf in det.landmarks_original:
-                    cv2.circle(
-                        annotated,
-                        (int(lx), int(ly)),
-                        LANDMARK_RADIUS, LANDMARK_COLOR, -1
-                    )
-
-        # HUD overlay: frame number + face count
-        hud_text = f"Frame: {frame_seq:05d}  |  Faces: {n_faces}"
-        cv2.putText(
-            annotated, hud_text,
-            (10, 28), FONT, FONT_SCALE_HUD, HUD_COLOR, 2
+        # Layer 3 shows only what Layer 3 produces: boxes, confidence, and
+        # landmarks when the checkpoint provides them.
+        drawing.draw_detections(
+            annotated, detections,
+            show_confidence=True,
+            show_landmarks=True,
         )
-
-        # Corner hint
-        hint_text = "Q: Quit  |  F: Fullscreen"
-        fh = annotated.shape[0]
-        cv2.putText(
-            annotated, hint_text,
-            (10, fh - 10), FONT, FONT_SCALE_HINT, HINT_COLOR, TEXT_THICKNESS
-        )
-
+        drawing.draw_hud(annotated,
+                         f"Frame: {frame_seq:05d}  |  Faces: {n_faces}")
+        drawing.draw_hint(annotated)
         return annotated
 
     # ─── Main Run ─────────────────────────────────────────────────────────────
