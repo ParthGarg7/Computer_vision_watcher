@@ -64,7 +64,7 @@ if _PROJECT_ROOT not in sys.path:
 
 from src.layer7_storage.store import DEFAULT_DB_PATH
 
-TABLES = ("sessions", "expression_events", "presence_events")
+TABLES = ("sessions", "appearances", "expression_events", "presence_events")
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -154,34 +154,56 @@ def cmd_stats(conn, db_path):
 
     people = conn.execute(
         "SELECT COALESCE(identity_label,'(unidentified)') AS who, COUNT(*) c, "
-        "SUM(presence_duration_seconds) secs FROM sessions "
-        "GROUP BY who ORDER BY secs DESC").fetchall()
+        "SUM(total_present_seconds) secs, SUM(appearance_count) apps "
+        "FROM sessions GROUP BY who ORDER BY secs DESC").fetchall()
     if people:
-        print(f"\n  {'Person':24} {'Sessions':>9} {'Total time':>12}")
-        print(f"  {'─'*24} {'─'*9} {'─'*12}")
+        print(f"\n  {'Person':24} {'Sessions':>9} {'Appearances':>12} {'Present':>10}")
+        print(f"  {'─'*24} {'─'*9} {'─'*12} {'─'*10}")
         for p in people:
             mins = (p["secs"] or 0) / 60.0
-            print(f"  {p['who'][:24]:24} {p['c']:>9} {mins:>10.1f} m")
+            print(f"  {p['who'][:24]:24} {p['c']:>9} {(p['apps'] or 0):>12} "
+                  f"{mins:>8.1f} m")
     print()
 
 
 def cmd_sessions(conn, limit):
     rows = conn.execute(
-        "SELECT * FROM sessions ORDER BY session_end DESC LIMIT ?",
+        "SELECT * FROM sessions ORDER BY session_start DESC LIMIT ?",
         (limit,)).fetchall()
     print(f"  ── SESSIONS (latest {len(rows)}) ──\n")
     if not rows:
         print("  (empty)\n")
         return
-    print(f"  {'Started':20} {'Person':12} {'Dur':>8} {'Frames':>7}  Top expressions")
-    print(f"  {'─'*20} {'─'*12} {'─'*8} {'─'*7}  {'─'*30}")
+    print(f"  {'Started':20} {'Person':12} {'Present':>9} {'Appear':>7} "
+          f"{'Frames':>7}  Top expressions")
+    print(f"  {'─'*20} {'─'*12} {'─'*9} {'─'*7} {'─'*7}  {'─'*26}")
     for r in rows:
+        open_marker = "" if r["session_end"] is not None else "  (open)"
         print(f"  {fmt_ts(r['session_start']):20} "
               f"{str(r['identity_label'] or '-')[:12]:12} "
-              f"{r['presence_duration_seconds']:>7.1f}s "
-              f"{r['frames_observed']:>7}  "
-              f"{top_n(r['dominant_expression_distribution'])}")
-    print(f"\n  (session_id of newest: {rows[0]['session_id']})\n")
+              f"{(r['total_present_seconds'] or 0):>8.1f}s "
+              f"{(r['appearance_count'] or 0):>7} "
+              f"{(r['frames_observed'] or 0):>7}  "
+              f"{top_n(r['dominant_expression_distribution'])}{open_marker}")
+    print(f"\n  (session_id of newest: {rows[0]['session_id']})")
+    print(f"  Use --appearances <session_id> to see the individual visits.\n")
+
+
+def cmd_appearances(conn, session_id):
+    rows = conn.execute(
+        "SELECT * FROM appearances WHERE session_id = ? ORDER BY started",
+        (session_id,)).fetchall()
+    print(f"  ── APPEARANCES for {session_id} ──\n")
+    if not rows:
+        print("  (none — the person may still be on screen, or the id is wrong)\n")
+        return
+    print(f"  {'#':>3}  {'From':20} {'To':20} {'Duration':>9} {'Frames':>7}")
+    print(f"  {'─'*3}  {'─'*20} {'─'*20} {'─'*9} {'─'*7}")
+    for i, r in enumerate(rows, 1):
+        print(f"  {i:>3}  {fmt_ts(r['started']):20} {fmt_ts(r['ended']):20} "
+              f"{r['duration_seconds']:>8.1f}s {r['frames_observed']:>7}")
+    total = sum(r["duration_seconds"] for r in rows)
+    print(f"\n  {len(rows)} appearance(s), {total:.1f}s present in total\n")
 
 
 def cmd_events(conn, limit):
@@ -226,11 +248,13 @@ def cmd_person(conn, name):
         print(f"  No sessions found for '{name}'.")
         print("  (Names are case-sensitive; try --stats to see who is recorded.)\n")
         return
-    total = sum(r["presence_duration_seconds"] for r in rows)
-    frames = sum(r["frames_observed"] for r in rows)
-    print(f"  Sessions   : {len(rows)}")
-    print(f"  Total time : {total/60:.1f} minutes ({total:.0f}s)")
-    print(f"  Frames seen: {frames}")
+    total = sum(r["total_present_seconds"] or 0 for r in rows)
+    frames = sum(r["frames_observed"] or 0 for r in rows)
+    apps = sum(r["appearance_count"] or 0 for r in rows)
+    print(f"  Sessions    : {len(rows)}  (one per program run)")
+    print(f"  Appearances : {apps}  (times they entered the frame)")
+    print(f"  Present for : {total/60:.1f} minutes ({total:.0f}s)")
+    print(f"  Frames seen : {frames}")
 
     combined = {}
     for r in rows:
@@ -471,6 +495,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Show EVERY table with all rows. '--dump N' caps rows per table.")
     m.add_argument("--sessions", nargs="?", type=int, const=15, metavar="N",
                    help="List the N most recent sessions (default 15)")
+    m.add_argument("--appearances", type=str, metavar="SESSION_ID",
+                   help="List every appearance inside one session")
     m.add_argument("--events", nargs="?", type=int, const=15, metavar="N",
                    help="List the N most recent expression events")
     m.add_argument("--presence", nargs="?", type=int, const=15, metavar="N",
@@ -517,6 +543,7 @@ def main():
         if hasattr(args, "dump"):      cmd_dump(conn, args.dump)
         elif args.stats:               cmd_stats(conn, args.db)
         elif args.sessions is not None: cmd_sessions(conn, args.sessions)
+        elif args.appearances:         cmd_appearances(conn, args.appearances)
         elif args.events is not None:   cmd_events(conn, args.events)
         elif args.presence is not None: cmd_presence(conn, args.presence)
         elif args.person:              cmd_person(conn, args.person)
