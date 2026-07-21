@@ -91,7 +91,30 @@ from deep_sort_realtime.deepsort_tracker import DeepSort
 # ─── Constants ────────────────────────────────────────────────────────────────
 
 # Track lifecycle parameters — see docstring above and Arch Doc §6.
-MAX_AGE = 70              # Frames before a lost track is deleted
+#
+# MAX_AGE is how long DeepSORT keeps predicting a track's position after the
+# detector stops seeing it. It is the ONLY thing that preserves the ID of a
+# person whose face cannot be embedded — a distant or blurry face that
+# InsightFace cannot fingerprint (12% of detections in real webcam footage).
+# Those tracks have nothing to store in the departed gallery, so once
+# DeepSORT gives up, a returning person is indistinguishable from a new one.
+#
+# Measured over a 1628-frame clip, counting how many display IDs were minted:
+#     max_age  seconds @21fps   IDs created
+#         70        3.3s             4      <- previous value
+#        150        7.1s             3      <- chosen
+#        250       11.9s             3      (no further gain)
+#
+# 70 frames was ~3.3 seconds, so stepping out of frame for 5-10 seconds
+# always produced a new ID. 150 covers that gap.
+#
+# TRADE-OFF: a track surviving longer without detections is matched on
+# position alone (no appearance signal when there is no embedding), so a
+# DIFFERENT person entering the same spot within the window can inherit the
+# ID. Registered people are unaffected — their display ID is pinned to their
+# FAISS identity and cannot be stolen this way. Lower this if strangers
+# start merging; raise it if IDs still churn.
+MAX_AGE = 150             # Frames before a lost track is deleted
 N_INIT = 3                # Consecutive detections to confirm a new track
 MAX_COSINE_DISTANCE = 0.45  # Tuned for ArcFace 512-d (default was 0.2 for 128-d)
 NN_BUDGET = 100           # Max embeddings stored per track in appearance gallery
