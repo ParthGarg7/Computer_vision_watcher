@@ -23,7 +23,7 @@ from src.layer7_storage.store import StorageLayer
 
 
 class FakeDet:
-    def __init__(self, tid, label=None, scores=None):
+    def __init__(self, tid, label=None, scores=None, fresh=True):
         self.track_id = tid
         self.identity_label = label
         self.expression_scores = scores
@@ -31,6 +31,9 @@ class FakeDet:
             max(scores, key=scores.get) if scores else None)
         self.expression_confidence = (
             max(scores.values()) if scores else None)
+        # Layer 6 only aggregates fresh readings; default True so existing
+        # tests read as "a real measurement arrived this frame".
+        self.expression_is_fresh = fresh
 
 
 class FakeCtx:
@@ -95,6 +98,35 @@ class SessionAggregatorTests(unittest.TestCase):
             alerts += self._events_of(events, "threshold_alert")
         self.assertEqual(len(alerts), 1)  # cooldown suppresses repeats
         self.assertGreater(alerts[0]["value"], NEGATIVE_RATIO_THRESHOLD)
+
+    def test_carried_forward_readings_are_not_aggregated(self):
+        # Regression: Layer 5 measures every 5th frame and carries the label
+        # forward in between. Aggregating those carry-forwards recorded one
+        # real measurement 5 times — inflating counts and the events table.
+        agg = SessionAggregator(storage=None)
+        # 1 fresh reading followed by 4 carry-forwards, twice over
+        for i in range(10):
+            fresh = (i % 5 == 0)
+            agg.process(FakeCtx(100.0 + i / 30, i,
+                                [FakeDet(1, "alice", HAPPY, fresh=fresh)]))
+        state = agg._sessions[1]
+        self.assertEqual(state.frames_observed, 10)       # every frame counts
+        self.assertEqual(sum(state.dominant_counts.values()), 2)  # 2 measurements
+        self.assertEqual(len(state.score_window), 2)      # window holds measurements
+
+    def test_only_fresh_readings_reach_storage(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = os.path.join(d, "fresh.db")
+            store = StorageLayer(db_path=db)
+            agg = SessionAggregator(storage=store)
+            for i in range(20):
+                agg.process(FakeCtx(100.0 + i / 30, i,
+                                    [FakeDet(1, "alice", HAPPY,
+                                             fresh=(i % 5 == 0))]))
+            agg.close()
+            store.close()
+            # 20 frames, 4 measurements -> 4 rows, not 20
+            self.assertEqual(store.n_expression_events, 4)
 
     def test_close_finalizes_open_sessions(self):
         agg = SessionAggregator(storage=None)

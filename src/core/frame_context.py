@@ -128,6 +128,13 @@ class Detection:
     dominant_expression: Optional[str] = None
     expression_confidence: Optional[float] = None
 
+    # True only on frames where inference ACTUALLY ran; False when the value
+    # was carried forward from a previous analysis (sticky label).
+    # Display code should ignore this and draw every frame — but anything
+    # that RECORDS or AGGREGATES must honour it, or one real measurement is
+    # counted EXPRESSION_EVERY_N_FRAMES times.
+    expression_is_fresh: bool = False
+
 
 @dataclass
 class FrameContext:

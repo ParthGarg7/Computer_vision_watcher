@@ -19,6 +19,13 @@ Outputs (Arch Doc §3):
            session_id, identity_label, presence_duration_seconds,
            expression_trend, dominant_expression_distribution,
            session_start, session_end
+
+       Expression aggregation consumes only FRESH readings (see
+       Detection.expression_is_fresh). Layer 5 throttles inference and
+       carries labels forward between measurements; counting those
+       carry-forwards would multiply every real measurement by the throttle
+       factor. dominant_expression_distribution therefore counts
+       measurements, not frames — ratios are identical, magnitudes are not.
     2. Real-time events — returned to the caller each frame (main.py prints
        them; Layer 8 will push them over WebSocket):
            presence_alert         (track appeared / departed)
@@ -95,6 +102,9 @@ class _TrackSession:
         # per-frame threshold check stays cheap (window is ~900 entries at
         # 30 fps x 30 s).
         self.score_sums: dict = {}
+        # Counts of MEASUREMENTS (fresh inferences), not frames — Layer 5
+        # samples every EXPRESSION_EVERY_N_FRAMES frames per track. Ratios
+        # are unaffected; absolute counts are ~N x smaller than frame counts.
         self.dominant_counts: dict = {}
         self.last_scores: dict = {}
         self.last_threshold_alert = 0.0
@@ -187,7 +197,13 @@ class SessionAggregator:
                 state.identity_label = det.identity_label
 
             # ── Expression aggregation ────────────────────────────────────
-            if det.expression_scores:
+            # Only FRESH readings count. Layer 5 measures every N frames and
+            # carries the label forward in between (so the display doesn't
+            # flicker); aggregating those carry-forwards would record one
+            # real measurement N times — inflating dominant_counts, bloating
+            # the events table N-fold, and filling the trend window with
+            # duplicates.
+            if det.expression_scores and det.expression_is_fresh:
                 state.last_scores = det.expression_scores
                 state.add_scores(now, det.expression_scores, TREND_WINDOW_SEC)
 
