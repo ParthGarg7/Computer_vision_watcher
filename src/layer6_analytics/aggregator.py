@@ -282,6 +282,9 @@ class SessionAggregator:
                         "dominant_expression": det.dominant_expression,
                         "confidence": det.expression_confidence or 0.0,
                         "expression_scores": det.expression_scores,
+                        "valence": det.valence,
+                        "arousal": det.arousal,
+                        "mood": det.mood,
                     })
 
                 # ── Threshold alert ───────────────────────────────────────

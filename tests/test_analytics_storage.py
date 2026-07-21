@@ -28,7 +28,8 @@ from src.layer7_storage.store import StorageLayer
 
 
 class FakeDet:
-    def __init__(self, tid, label=None, scores=None, fresh=True, person_id=None):
+    def __init__(self, tid, label=None, scores=None, fresh=True, person_id=None,
+                 valence=None, arousal=None, mood=None):
         self.track_id = tid
         self.identity_label = label
         self.person_id = person_id
@@ -40,6 +41,10 @@ class FakeDet:
         # Layer 6 only aggregates fresh readings; default True so existing
         # tests read as "a real measurement arrived this frame".
         self.expression_is_fresh = fresh
+        # Dimensional affect — None for the plain 8-class models
+        self.valence = valence
+        self.arousal = arousal
+        self.mood = mood
 
 
 class FakeCtx:

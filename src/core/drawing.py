@@ -42,6 +42,7 @@ COLORS = {
     "fail_bg":    (0, 0, 200),      # Red — embedding failed (loud on purpose)
     "expr_bg":    (0, 130, 180),    # Teal — expression
     "expr_low_bg": (60, 60, 60),    # Dark grey — low-confidence expression
+    "mood_bg":    (110, 70, 20),    # Deep blue — mood (valence/arousal state)
     "text":       (255, 255, 255),  # White
     "hud":        (0, 220, 220),    # Cyan
     "hint":       (160, 160, 160),  # Grey
@@ -173,6 +174,7 @@ def draw_detections(
     show_track: bool = False,
     show_identity: bool = False,
     show_expression: bool = False,
+    show_mood: bool = False,
     show_bars: bool = False,
     show_landmarks: bool = False,
     track_placeholder: bool = False,
@@ -237,6 +239,14 @@ def draw_detections(
             elif expression_placeholder:
                 label_y = put_label(img, "analysing...", x1, label_y,
                                     COLORS["expr_bg"])
+
+        # Mood sits above the expression: it is the broader state, derived
+        # from valence/arousal rather than the 8-way classification.
+        if show_mood and getattr(det, "mood", None):
+            text = det.mood
+            if det.valence is not None:
+                text = f"{det.mood}  {det.valence:+.2f}/{det.arousal:+.2f}"
+            label_y = put_label(img, text, x1, label_y, COLORS["mood_bg"])
 
         if show_bars and det.expression_scores:
             draw_probability_bars(img, det.expression_scores, x2 + 6, y1)

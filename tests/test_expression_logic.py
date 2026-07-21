@@ -45,6 +45,7 @@ def make_analyser(probs, every_n_frames=5):
     a._frame_counter = {}
     a._last_known = {}
     a._score_buffer = {}
+    a._va_buffer = {}
     a._class_names = list(EMOTION_CLASSES)
     a._model = FakeModel(probs)
     return a
@@ -58,6 +59,9 @@ class FakeDet:
         self.dominant_expression = None
         self.expression_confidence = None
         self.expression_is_fresh = False
+        self.valence = None
+        self.arousal = None
+        self.mood = None
 
 
 class FakeCtx:

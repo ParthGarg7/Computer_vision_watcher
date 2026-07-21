@@ -135,6 +135,19 @@ class Detection:
     # counted EXPRESSION_EVERY_N_FRAMES times.
     expression_is_fresh: bool = False
 
+    # ── Dimensional affect (multi-task models only; None otherwise) ───────
+    # valence : unpleasant (-1) .. pleasant (+1)
+    # arousal : calm       (-1) .. excited  (+1)
+    # Together they place the face on Russell's circumplex, which can express
+    # states the 8 classes cannot — calmly happy vs excitedly happy, or
+    # subdued vs tense. See src/layer5_expression/mood.py.
+    valence: Optional[float] = None
+    arousal: Optional[float] = None
+
+    # Named state derived from valence/arousal, or from a custom rule.
+    # None when the model provides no dimensional output and no rule matched.
+    mood: Optional[str] = None
+
 
 @dataclass
 class FrameContext:

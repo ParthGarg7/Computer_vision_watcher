@@ -113,7 +113,10 @@ CREATE TABLE IF NOT EXISTS expression_events (
     identity_label      TEXT,
     dominant_expression TEXT NOT NULL,
     confidence          REAL NOT NULL,
-    expression_scores   TEXT NOT NULL    -- JSON: class -> probability
+    expression_scores   TEXT NOT NULL,   -- JSON: class -> probability
+    valence             REAL,            -- unpleasant -1 .. +1 pleasant
+    arousal             REAL,            -- calm       -1 .. +1 excited
+    mood                TEXT             -- named state from valence/arousal
 );
 CREATE INDEX IF NOT EXISTS idx_expr_ts      ON expression_events (timestamp);
 CREATE INDEX IF NOT EXISTS idx_expr_track   ON expression_events (track_id);
@@ -300,6 +303,9 @@ class StorageLayer:
             record["dominant_expression"],
             record["confidence"],
             json.dumps(record["expression_scores"]),
+            record.get("valence"),
+            record.get("arousal"),
+            record.get("mood"),
         ))
         if len(self._event_buffer) >= BATCH_SIZE:
             self.flush()
@@ -325,7 +331,8 @@ class StorageLayer:
             "INSERT INTO expression_events "
             "(session_id, timestamp, camera_id, frame_seq, track_id, "
             " identity_label, dominant_expression, confidence, "
-            " expression_scores) VALUES (?,?,?,?,?,?,?,?,?)",
+            " expression_scores, valence, arousal, mood) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             self._event_buffer,
         )
         self._conn.commit()

@@ -215,6 +215,7 @@ def draw_all_detections(
         show_track=enable_identity,
         show_identity=enable_identity,
         show_expression=enable_expression,
+        show_mood=enable_expression,
         show_bars=enable_expression,
         show_landmarks=True,
     )
