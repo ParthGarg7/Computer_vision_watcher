@@ -411,6 +411,16 @@ def run_pipeline(
                     fps_count = 0
                     fps_start = time.time()
 
+                # Heartbeat — file-only pulse every ~300 frames so a
+                # post-mortem has a timeline: when it was alive, how fast it
+                # was running, and how busy the scene was right before any
+                # incident. (Yesterday's crash videos showed FPS 8.4 at the
+                # moment of death; a heartbeat would have shown for how long.)
+                if frame_seq % 300 == 0:
+                    log.debug(f"heartbeat: frame={frame_seq} "
+                              f"fps={display_fps:.1f} "
+                              f"faces={len(ctx.detections)}")
+
                 # Draw
                 display = original_frame.copy()
                 display = draw_all_detections(

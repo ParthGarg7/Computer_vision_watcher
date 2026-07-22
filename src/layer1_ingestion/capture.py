@@ -97,16 +97,28 @@ class VideoCapture:
                 f"[Layer1] Failed to open source: {self.source!r}\n"
                 f"  Check that the webcam/file/RTSP URL is correct and accessible."
             )
+        log.debug(f"[Layer1] connected: source={self.source!r} "
+                  f"{self.width}x{self.height} @ {self.fps:.1f}fps "
+                  f"live={self.is_live}")
 
-    def _attempt_rtsp_reconnect(self):
+    def _attempt_reconnect(self, kind: str):
         """
-        Try to reconnect after an RTSP connection drop.
+        Try to recover a LIVE source (webcam or RTSP) after a read failure.
+
+        Webcams need this as much as RTSP: a USB or driver hiccup makes
+        cv2 return one failed read, and treating that as end-of-stream ends
+        the whole run — which, mid-demo, is indistinguishable from a crash.
+        The window closes, no explanation. (Observed live: runs that ended
+        abruptly after ~30-45s with the camera image healthy to the final
+        frame.) A live source gets reconnect_attempts chances to come back
+        before we give up, and every attempt is logged.
+
         Returns (success, frame) tuple.
         """
         for attempt in range(1, self.reconnect_attempts + 1):
             log.warning(
-                f"  [Layer1] RTSP connection lost. "
-                f"Attempt {attempt}/{self.reconnect_attempts} in "
+                f"  [Layer1] {kind} stopped delivering frames. "
+                f"Reconnect attempt {attempt}/{self.reconnect_attempts} in "
                 f"{self.reconnect_delay_sec}s..."
             )
             time.sleep(self.reconnect_delay_sec)
@@ -118,7 +130,8 @@ class VideoCapture:
                     return True, frame
             except RuntimeError:
                 pass
-        log.error(f"  [Layer1] All reconnect attempts failed. Stopping stream.")
+        log.error(f"  [Layer1] All {self.reconnect_attempts} reconnect "
+                  f"attempts failed — the {kind} is gone. Stopping stream.")
         return False, None
 
     # ─── Properties ──────────────────────────────────────────────────────────
@@ -168,11 +181,14 @@ class VideoCapture:
         ret, frame = self._cap.read()
 
         if not ret or frame is None:
-            # RTSP: attempt reconnect
+            # LIVE sources (webcam, RTSP) get reconnect attempts — one failed
+            # read must not end a live run. Video files: EOF is normal.
             src = self._resolve_source()
             if isinstance(src, str) and src.startswith("rtsp://"):
-                return self._attempt_rtsp_reconnect()
-            # Video file or webcam: no more frames
+                return self._attempt_reconnect("RTSP stream")
+            if isinstance(src, int):
+                return self._attempt_reconnect(f"webcam {src}")
+            log.info(f"  [Layer1] End of video file reached.")
             return False, None
 
         return True, frame
@@ -206,6 +222,10 @@ class VideoCapture:
         while True:
             ret, frame = self.read_frame()
             if not ret:
+                # The reason the run is ending — the log line that was
+                # missing when demo runs terminated with no explanation.
+                log.warning(f"  [Layer1] Frame stream ended at frame {seq} "
+                            f"({'live source lost' if live else 'end of file'}).")
                 break
             ts = time.time() if live else start_time + seq / fps
             yield seq, ts, frame

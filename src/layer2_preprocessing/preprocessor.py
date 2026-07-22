@@ -28,6 +28,9 @@ Ref: Layer 2 Architecture Doc — Sections 3.1, 3.2, 5 (Per-Model Preprocessing 
 import cv2
 import numpy as np
 from src.core.frame_context import FrameContext
+from src.core.logger import get_logger
+
+log = get_logger("watcher.layer2")
 
 # YOLOv8 default input size (width, height) for cv2.resize
 YOLOV8_INPUT_SIZE_WH = (640, 640)
@@ -56,6 +59,7 @@ class Preprocessor:
         self.model_input_size_wh = model_input_size_wh  # (W, H) for cv2.resize
         # Store as (H, W) for consistent use in shape tuples
         self.resized_shape_hw = (model_input_size_wh[1], model_input_size_wh[0])
+        log.debug(f"[Layer2] preprocessor ready, target size {model_input_size_wh}")
 
     def process(
         self,
