@@ -59,6 +59,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+from src.core.logger import setup_logging
 from src.layer4_identity.embedder import FaceEmbedder, FULL_IMAGE_DET_SIZE
 from src.layer4_identity.identity_store import IdentityStore, DEFAULT_STORE_PATH
 
@@ -451,6 +452,7 @@ def build_parser() -> argparse.ArgumentParser:
 # ─── Entry Point ──────────────────────────────────────────────────────────────
 
 def main():
+    setup_logging()
     parser = build_parser()
     args = parser.parse_args()
 

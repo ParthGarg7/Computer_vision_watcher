@@ -66,6 +66,10 @@ import sqlite3
 import time
 from typing import Optional
 
+from src.core.logger import get_logger
+
+log = get_logger("watcher.layer7")
+
 # ─── Constants ────────────────────────────────────────────────────────────────
 
 DEFAULT_DB_PATH = "data/watcher.db"
@@ -190,9 +194,9 @@ class StorageLayer:
 
         removed = self.clear_unregistered() if clear_unregistered else 0
 
-        print(f"  [Layer7] Storage ready: {db_path} (SQLite WAL — dev "
+        log.info(f"  [Layer7] Storage ready: {db_path} (SQLite WAL — dev "
               f"substitute for PostgreSQL/TimescaleDB per Arch Doc §6)")
-        print(f"  [Layer7] Run id: {self.run_id}"
+        log.info(f"  [Layer7] Run id: {self.run_id}"
               + (f" | cleared {removed} rows from unregistered people "
                  f"in previous runs" if removed else ""))
 

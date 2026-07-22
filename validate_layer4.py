@@ -22,11 +22,13 @@ _ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
+from src.core.logger import setup_logging
 from src.layer4_identity.validator import Layer4ValidationPipeline
 from src.layer4_identity.identity_store import DEFAULT_STORE_PATH
 
 
 def main():
+    setup_logging()
     parser = argparse.ArgumentParser(
         description="The Watcher — Layer 4 Identity Validation"
     )

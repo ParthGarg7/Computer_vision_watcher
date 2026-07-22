@@ -41,6 +41,10 @@ from src.core.gpu_setup import register_nvidia_dlls, cuda_is_usable
 # InsightFace import — requires: pip install insightface
 from insightface.app import FaceAnalysis
 
+from src.core.logger import get_logger
+
+log = get_logger("watcher.layer4.embedder")
+
 # ─── Constants ────────────────────────────────────────────────────────────────
 
 # Directory where InsightFace stores downloaded model packs.
@@ -135,9 +139,9 @@ class FaceEmbedder:
         # demo and a full audit. Warn once so it can never hide again.
         self._embed_warned = False
 
-        print(f"  [Layer4-Embedder] Loading InsightFace model pack: {model_pack}")
-        print(f"  [Layer4-Embedder] Root       : {_INSIGHTFACE_ROOT}")
-        print(f"  [Layer4-Embedder] Device ID  : {self._device_id} "
+        log.info(f"  [Layer4-Embedder] Loading InsightFace model pack: {model_pack}")
+        log.info(f"  [Layer4-Embedder] Root       : {_INSIGHTFACE_ROOT}")
+        log.info(f"  [Layer4-Embedder] Device ID  : {self._device_id} "
               f"({'CUDA' if self._device_id >= 0 else 'CPU'})")
 
         # allowed_modules: buffalo_l ships 5 models (SCRFD detection, ArcFace
@@ -159,11 +163,11 @@ class FaceEmbedder:
         try:
             rec_model = self._app.models.get("recognition")
             actual = rec_model.session.get_providers()
-            print(f"  [Layer4-Embedder] ONNX providers: {actual}")
+            log.info(f"  [Layer4-Embedder] ONNX providers: {actual}")
         except Exception:
             pass
 
-        print(f"  [Layer4-Embedder] Ready.\n")
+        log.info(f"  [Layer4-Embedder] Ready.\n")
 
     # ─── Public API ───────────────────────────────────────────────────────────
 
@@ -249,7 +253,7 @@ class FaceEmbedder:
         """Print an embedding-failure warning the first time only."""
         if not self._embed_warned:
             self._embed_warned = True
-            print(f"  [Layer4-Embedder] WARNING: {msg} "
+            log.warning(f"  [Layer4-Embedder] {msg} "
                   f"Faces will show 'no-embed'. Further warnings suppressed.")
 
     def _get_aligned_face(self, frame: np.ndarray, face) -> np.ndarray:

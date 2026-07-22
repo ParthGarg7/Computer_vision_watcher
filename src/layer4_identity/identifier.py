@@ -28,6 +28,10 @@ from src.layer4_identity.embedder import FaceEmbedder
 from src.layer4_identity.identity_store import IdentityStore, DEFAULT_STORE_PATH
 from src.layer4_identity.tracker import FaceTracker
 
+from src.core.logger import get_logger
+
+log = get_logger("watcher.layer4")
+
 # ─── Defaults ────────────────────────────────────────────────────────────────
 
 DEFAULT_CONFIDENCE = 0.5   # Only pass detections with >= this score to tracker
@@ -67,7 +71,7 @@ class FaceIdentifier:
         device : str
             'cuda', 'cpu', or 'auto'. Passed to FaceEmbedder (InsightFace).
         """
-        print(f"\n  Initializing Layer 4: Identity...")
+        log.info(f"\n  Initializing Layer 4: Identity...")
 
         self.embedder = FaceEmbedder(device=device)
         self.store = IdentityStore(
@@ -76,7 +80,7 @@ class FaceIdentifier:
         )
         self.tracker = FaceTracker()
 
-        print(
+        log.info(
             f"  [Layer4] Ready. "
             f"Registry: {self.store.n_people} people, "
             f"{self.store.n_embeddings} embeddings.\n"
