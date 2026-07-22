@@ -39,6 +39,10 @@ from typing import Optional
 import faiss
 import numpy as np
 
+from src.core.logger import get_logger
+
+log = get_logger("watcher.layer4.store")
+
 # ─── Constants ────────────────────────────────────────────────────────────────
 
 EMBEDDING_DIM = 512          # ArcFace embedding dimensionality
@@ -100,7 +104,7 @@ class IdentityStore:
         if os.path.exists(self._faiss_path) and os.path.exists(self._meta_path):
             self._load()
         else:
-            print(f"  [IdentityStore] No existing store at '{store_path}'. "
+            log.info(f"  [IdentityStore] No existing store at '{store_path}'. "
                   f"Starting empty.")
 
     # ─── Public API ───────────────────────────────────────────────────────────
@@ -349,7 +353,7 @@ class IdentityStore:
 
     def _load(self):
         """Load a persisted index and metadata from disk."""
-        print(f"  [IdentityStore] Loading store from '{self.store_path}'...")
+        log.info(f"  [IdentityStore] Loading store from '{self.store_path}'...")
         self._index = faiss.read_index(self._faiss_path)
         with open(self._meta_path, "r", encoding="utf-8") as f:
             payload = json.load(f)
@@ -357,7 +361,7 @@ class IdentityStore:
         self._id_map = payload["id_map"]
         if "threshold" in payload:
             self.recognition_threshold = payload["threshold"]
-        print(
+        log.info(
             f"  [IdentityStore] Loaded: {self.n_people} people, "
             f"{self.n_embeddings} embeddings."
         )

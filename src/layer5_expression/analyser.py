@@ -50,6 +50,8 @@ Output:
 Ref: Layer 5 Architecture Doc — Sections 1, 2, 3, 4.1, 6
 """
 
+import os
+
 import cv2
 import numpy as np
 import onnxruntime as ort
@@ -57,7 +59,10 @@ from typing import Optional
 
 from src.core.frame_context import FrameContext
 from src.core.gpu_setup import register_nvidia_dlls, cuda_is_usable
+from src.core.logger import get_logger
 from src.layer5_expression import mood as mood_module
+
+log = get_logger("watcher.layer5")
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -108,6 +113,24 @@ EMOTION_CLASSES = [
     "anger", "contempt", "disgust", "fear",
     "happiness", "neutral", "sadness", "surprise"
 ]
+
+# Where hsemotion-onnx caches downloaded model weights. First use of a model
+# NOT in this directory triggers a download from GitHub — the only point in
+# the whole pipeline that needs the network. Offline with a cold cache, that
+# download raises, and before the fallback logic below existed it took the
+# entire program down at startup (observed live, twice, during a demo with
+# WiFi off).
+HSEMOTION_CACHE = os.path.join(os.path.expanduser("~"), ".hsemotion")
+
+# Known-good models to fall back to when the requested one cannot be loaded.
+# Only CACHED fallbacks are attempted — retrying downloads offline is
+# pointless. b2_8 is deliberately absent (miscalibrated, see above).
+FALLBACK_MODELS = ["enet_b0_8_best_vgaf", "enet_b0_8_best_afew"]
+
+
+def _is_cached(model_name: str) -> bool:
+    """True if this model's weights are already on disk (no network needed)."""
+    return os.path.isfile(os.path.join(HSEMOTION_CACHE, model_name + ".onnx"))
 
 
 class ExpressionAnalyser:
@@ -173,18 +196,51 @@ class ExpressionAnalyser:
 
         if model_name is None:
             model_name = DEFAULT_MODEL
-        self.model_name = model_name
 
-        print(f"  [Layer5] Loading expression model: {model_name}")
-        print(f"  [Layer5] ONNX execution provider  : "
-              f"{'CUDA (GPU)' if _cuda_available else 'CPU'}")
-        # hsemotion_onnx does `import urllib` then calls urllib.request.* when
-        # downloading weights on first run — which only works if something
-        # else already imported the submodule. Import it here so the very
-        # first launch on a clean machine doesn't crash with AttributeError.
-        import urllib.request  # noqa: F401
-        from hsemotion_onnx.facial_emotions import HSEmotionRecognizer
-        self._model = HSEmotionRecognizer(model_name=model_name)
+        log.info(f"  [Layer5] Loading expression model: {model_name}")
+        log.info(f"  [Layer5] ONNX execution provider  : "
+                 f"{'CUDA (GPU)' if _cuda_available else 'CPU'}")
+
+        # ── Load the model, surviving an offline cold cache ──────────────────
+        # Candidate order: the requested model first (attempted even when not
+        # cached — that is the legitimate one-time download when online), then
+        # only CACHED fallbacks. A failure must never propagate: Layer 5 dying
+        # must not take Layers 1-4, 6 and 7 down with it.
+        self._model = None
+        self.model_name = None
+        candidates = [model_name] + [m for m in FALLBACK_MODELS
+                                     if m != model_name and _is_cached(m)]
+        for i, cand in enumerate(candidates):
+            if not _is_cached(cand):
+                log.warning(
+                    f"  [Layer5] Model '{cand}' is NOT cached in "
+                    f"{HSEMOTION_CACHE} — attempting download from GitHub "
+                    f"(REQUIRES INTERNET; offline this will fail).")
+            try:
+                self._model = self._load_model(cand)
+                self.model_name = cand
+                if i > 0:
+                    log.warning(f"  [Layer5] Using fallback model '{cand}' — "
+                                f"valence/arousal/mood may be unavailable.")
+                break
+            except Exception as e:
+                # Full traceback to the log file; concise line to console.
+                log.error(f"  [Layer5] Failed to load '{cand}': "
+                          f"{type(e).__name__}: {e}")
+                log.debug("  [Layer5] traceback for the failure above:",
+                          exc_info=True)
+
+        if self._model is None:
+            # Degraded but ALIVE: expression analysis is disabled for this
+            # run; every other layer continues. analyse() becomes a no-op.
+            log.error(
+                "  [Layer5] No expression model could be loaded — expression "
+                "analysis is DISABLED for this run. The rest of the pipeline "
+                "continues. Remedy: connect to the internet once so the model "
+                f"can download into {HSEMOTION_CACHE}, or copy that folder "
+                "from a machine that has it.")
+            self._class_names = list(EMOTION_CLASSES)
+            return
 
         # Read the class-index mapping straight from the model so labels can
         # never drift out of sync with the ONNX output order (7- and 8-class
@@ -204,8 +260,19 @@ class ExpressionAnalyser:
         if _cuda_available:
             self._patch_model_to_gpu()
 
-        print(f"  [Layer5] Expression analyser ready. "
-              f"Throttle: every {every_n_frames} frames per track.\n")
+        log.info(f"  [Layer5] Expression analyser ready. "
+                 f"Throttle: every {every_n_frames} frames per track.\n")
+
+    @staticmethod
+    def _load_model(model_name: str):
+        """Construct the hsemotion recogniser (may download on first use)."""
+        # hsemotion_onnx does `import urllib` then calls urllib.request.* when
+        # downloading weights — which only works if something else already
+        # imported the submodule. Import it here so the very first launch on
+        # a clean machine doesn't crash with AttributeError.
+        import urllib.request  # noqa: F401
+        from hsemotion_onnx.facial_emotions import HSEmotionRecognizer
+        return HSEmotionRecognizer(model_name=model_name)
 
     # ─── Public API ───────────────────────────────────────────────────────────
 
@@ -231,6 +298,11 @@ class ExpressionAnalyser:
         FrameContext
             Same object with Layer 5 expression fields populated where analysis ran.
         """
+        # Disabled mode (no model could be loaded — e.g. offline cold cache):
+        # a clean no-op, so the rest of the pipeline runs untouched.
+        if self._model is None:
+            return ctx
+
         for det in ctx.detections:
             track_id = det.track_id
             face_crop = det.face_crop
@@ -394,15 +466,15 @@ class ExpressionAnalyser:
                         # provider DLLs fail to load — verify, don't assume.
                         if "CUDAExecutionProvider" in actual:
                             setattr(self._model, attr_name, new_session)
-                            print(f"  [Layer5] GPU patch applied ({attr_name}): {actual}")
+                            log.info(f"  [Layer5] GPU patch applied ({attr_name}): {actual}")
                         else:
-                            print(f"  [Layer5] GPU patch fell back to CPU "
+                            log.warning(f"  [Layer5] GPU patch fell back to CPU "
                                   f"({attr_name}): {actual} — CUDA provider "
                                   f"failed to initialise. Keeping original session.")
                         patched = True
                         break
                 except Exception as e:
-                    print(f"  [Layer5] GPU patch failed on {attr_name}: {e}")
+                    log.warning(f"  [Layer5] GPU patch failed on {attr_name}: {e}")
                     break
 
         if not patched:
@@ -418,9 +490,9 @@ class ExpressionAnalyser:
                             actual = new_session.get_providers()
                             if "CUDAExecutionProvider" in actual:
                                 setattr(self._model, attr_name, new_session)
-                                print(f"  [Layer5] GPU patch applied ({attr_name}): {actual}")
+                                log.info(f"  [Layer5] GPU patch applied ({attr_name}): {actual}")
                             else:
-                                print(f"  [Layer5] GPU patch fell back to CPU "
+                                log.warning(f"  [Layer5] GPU patch fell back to CPU "
                                       f"({attr_name}): {actual} — keeping original session.")
                             patched = True
                             break
@@ -428,8 +500,8 @@ class ExpressionAnalyser:
                         pass
 
         if not patched:
-            print("  [Layer5] GPU patch: could not locate ONNX session — running on CPU.")
-            print("  [Layer5]   (This is harmless; expression model will use CPU fallback.)")
+            log.warning("  [Layer5] GPU patch: could not locate ONNX session — running on CPU.")
+            log.warning("  [Layer5]   (This is harmless; expression model will use CPU fallback.)")
 
     def _run_inference(
         self,
@@ -508,6 +580,6 @@ class ExpressionAnalyser:
             # pipeline. Warn once so failures aren't silently invisible.
             if not getattr(self, "_inference_error_reported", False):
                 self._inference_error_reported = True
-                print(f"  [Layer5] WARNING: expression inference failed "
+                log.warning(f"  [Layer5] expression inference failed "
                       f"({type(e).__name__}: {e}). Further errors suppressed.")
             return FAIL

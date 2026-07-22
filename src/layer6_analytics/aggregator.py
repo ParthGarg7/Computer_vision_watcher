@@ -61,6 +61,10 @@ from collections import deque
 
 from src.core.frame_context import FrameContext
 
+from src.core.logger import get_logger
+
+log = get_logger("watcher.layer6")
+
 # ─── Constants ────────────────────────────────────────────────────────────────
 
 # Seconds without a sighting before the current appearance is closed.
@@ -199,7 +203,7 @@ class SessionAggregator:
 
         self._run_id = getattr(storage, "run_id", "norun")
 
-        print(f"  [Layer6] Analytics ready. Appearance timeout: "
+        log.info(f"  [Layer6] Analytics ready. Appearance timeout: "
               f"{APPEARANCE_TIMEOUT_SEC:.0f}s, trend window: "
               f"{TREND_WINDOW_SEC:.0f}s, storage: "
               f"{'ON' if storage is not None else 'OFF'}")

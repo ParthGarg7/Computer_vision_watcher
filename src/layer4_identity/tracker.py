@@ -88,6 +88,10 @@ from typing import List, Optional, Tuple
 
 from deep_sort_realtime.deepsort_tracker import DeepSort
 
+from src.core.logger import get_logger
+
+log = get_logger("watcher.layer4.tracker")
+
 # ─── Constants ────────────────────────────────────────────────────────────────
 
 # Track lifecycle parameters — see docstring above and Arch Doc §6.
@@ -224,12 +228,12 @@ class FaceTracker:
         self._departed: dict = {}           # display id → {"emb", "last_seen"}
         self._identity_to_display: dict = {}  # FAISS person_id → display id
         self._next_display_id = 1
-        print(
+        log.info(
             f"  [Layer4-Tracker] DeepSORT initialized "
             f"(max_age={max_age}, n_init={n_init}, "
             f"max_cosine_dist={max_cosine_distance})"
         )
-        print(f"  [Layer4-Tracker] Appearance model: ArcFace 512-d (swapped "
+        log.info(f"  [Layer4-Tracker] Appearance model: ArcFace 512-d (swapped "
               f"from default pedestrian ReID 128-d)")
 
     # ─── Public API ───────────────────────────────────────────────────────────

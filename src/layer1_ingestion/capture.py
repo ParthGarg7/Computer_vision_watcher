@@ -19,6 +19,10 @@ import cv2
 import time
 from typing import Generator
 
+from src.core.logger import get_logger
+
+log = get_logger("watcher.layer1")
+
 
 class VideoCapture:
     """
@@ -100,7 +104,7 @@ class VideoCapture:
         Returns (success, frame) tuple.
         """
         for attempt in range(1, self.reconnect_attempts + 1):
-            print(
+            log.warning(
                 f"  [Layer1] RTSP connection lost. "
                 f"Attempt {attempt}/{self.reconnect_attempts} in "
                 f"{self.reconnect_delay_sec}s..."
@@ -110,11 +114,11 @@ class VideoCapture:
                 self._connect()
                 ret, frame = self._cap.read()
                 if ret and frame is not None:
-                    print(f"  [Layer1] Reconnected successfully.")
+                    log.info(f"  [Layer1] Reconnected successfully.")
                     return True, frame
             except RuntimeError:
                 pass
-        print(f"  [Layer1] All reconnect attempts failed. Stopping stream.")
+        log.error(f"  [Layer1] All reconnect attempts failed. Stopping stream.")
         return False, None
 
     # ─── Properties ──────────────────────────────────────────────────────────

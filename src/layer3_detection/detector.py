@@ -38,6 +38,9 @@ import torch
 from ultralytics import YOLO
 
 from src.core.frame_context import FrameContext, Detection
+from src.core.logger import get_logger
+
+log = get_logger("watcher.layer3")
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -88,14 +91,13 @@ class FaceDetector:
 
         self.confidence_threshold = confidence_threshold
 
-        print(f"  [Layer3] Loading: {model_path}")
-        print(f"  [Layer3] Device : {self.device.upper()}", end="")
+        log.info(f"  [Layer3] Loading: {model_path}")
+        device_line = f"  [Layer3] Device : {self.device.upper()}"
         if self.device == "cuda":
             gpu_name = torch.cuda.get_device_name(0)
             gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
-            print(f" ({gpu_name}, {gpu_mem:.1f}GB)")
-        else:
-            print()
+            device_line += f" ({gpu_name}, {gpu_mem:.1f}GB)"
+        log.info(device_line)
 
         self.model = YOLO(model_path)
         self.model.to(self.device)
@@ -107,17 +109,17 @@ class FaceDetector:
         self._has_landmark_head = "Pose" in model_type or "Keypoint" in model_type
 
         if not self._has_landmark_head:
-            print(
+            log.info(
                 f"  [Layer3] Checkpoint type: {model_type} — "
                 f"landmark output NOT available for this checkpoint.\n"
                 f"  [Layer3] landmarks_original will be None. "
                 f"Swap to a pose-capable checkpoint for 5-point landmarks (Layer 4 prep)."
             )
         else:
-            print(f"  [Layer3] Checkpoint type: {model_type} — 5-point landmarks AVAILABLE.")
+            log.info(f"  [Layer3] Checkpoint type: {model_type} — 5-point landmarks AVAILABLE.")
 
-        print(f"  [Layer3] Confidence threshold: {self.confidence_threshold}")
-        print(f"  [Layer3] Ready.\n")
+        log.info(f"  [Layer3] Confidence threshold: {self.confidence_threshold}")
+        log.info(f"  [Layer3] Ready.\n")
 
     # ─── Public API ───────────────────────────────────────────────────────────
 

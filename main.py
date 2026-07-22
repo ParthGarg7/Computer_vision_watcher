@@ -46,6 +46,9 @@ import numpy as np
 import torch
 
 from src.core import drawing
+from src.core.logger import setup_logging, get_logger
+
+log = get_logger("watcher.main")
 
 os.environ["YOLO_VERBOSE"] = "False"
 
@@ -247,42 +250,67 @@ def run_pipeline(
     from src.layer2_preprocessing.preprocessor import Preprocessor
     from src.layer3_detection.detector import FaceDetector
 
-    print(f"\n  Initializing pipeline components...")
+    log.info("\n  Initializing pipeline components...")
     preprocessor = Preprocessor()
+
+    # Layers 1-3 are the non-negotiable core: without capture, preprocessing
+    # and detection there is no pipeline, so a failure here is fatal (and the
+    # excepthook writes its traceback to logs/watcher.log). Layers 4-7 are
+    # OPTIONAL enrichment — each is constructed under a guard below, and a
+    # failure (missing model cache offline, driver trouble, corrupt weights)
+    # degrades that layer instead of killing the demo.
     detector = FaceDetector(model_path="models/yolov8n-face.pt",
                             confidence_threshold=0.5)
 
     identifier = None
     if enable_identity:
-        from src.layer4_identity.identifier import FaceIdentifier
-        identifier = FaceIdentifier()
+        try:
+            from src.layer4_identity.identifier import FaceIdentifier
+            identifier = FaceIdentifier()
+        except Exception:
+            log.exception("  [Layer4] FAILED to initialise — identity, "
+                          "expression and analytics are disabled for this "
+                          "run. If InsightFace weights are missing, connect "
+                          "once so ~/.insightface can populate, or copy that "
+                          "folder from another machine.")
+            enable_identity = False
 
     analyser = None
     if enable_expression and enable_identity:
-        from src.layer5_expression.analyser import ExpressionAnalyser
-        analyser = ExpressionAnalyser()
+        try:
+            from src.layer5_expression.analyser import ExpressionAnalyser
+            analyser = ExpressionAnalyser()   # survives offline internally
+        except Exception:
+            log.exception("  [Layer5] FAILED to initialise — expression "
+                          "analysis disabled for this run.")
     elif enable_expression and not enable_identity:
-        print("  [Warn] --no-identity was set; Layer 5 requires Layer 4. "
-              "Skipping expression analysis.")
+        log.warning("  [Warn] identity is unavailable; Layer 5 requires "
+                    "Layer 4. Skipping expression analysis.")
 
     # Layers 6 (Analytics) + 7 (Storage) — session metrics need track IDs
     aggregator = None
     storage = None
     if enable_analytics and enable_identity:
-        from src.layer6_analytics.aggregator import SessionAggregator
-        from src.layer7_storage.store import StorageLayer
-        storage = StorageLayer()
-        aggregator = SessionAggregator(storage=storage)
+        try:
+            from src.layer6_analytics.aggregator import SessionAggregator
+            from src.layer7_storage.store import StorageLayer
+            storage = StorageLayer()
+            aggregator = SessionAggregator(storage=storage)
+        except Exception:
+            log.exception("  [Layer6/7] FAILED to initialise — analytics and "
+                          "storage disabled for this run.")
+            storage = None
+            aggregator = None
     elif enable_analytics and not enable_identity:
-        print("  [Warn] --no-identity was set; Layers 6/7 require Layer 4 "
-              "track IDs. Skipping analytics and storage.")
+        log.warning("  [Warn] identity is unavailable; Layers 6/7 require "
+                    "Layer 4 track IDs. Skipping analytics and storage.")
 
     # VideoWriter
     writer = None
     output_path = None
     writer_ready = False
 
-    print(f"\n  Starting capture. Press [Q] to quit, [F] to toggle fullscreen.\n")
+    log.info(f"\n  Starting capture. Press [Q] to quit, [F] to toggle fullscreen.\n")
 
     WIN_NAME = "The Watcher -- Pipeline"
     _gui_window = False
@@ -291,8 +319,8 @@ def run_pipeline(
         _gui_window = True
         cv2.resizeWindow(WIN_NAME, 960, 540)
     except cv2.error:
-        print("  [ERROR] cv2.namedWindow failed — opencv-python-headless may be installed.")
-        print("  [FIX]   pip uninstall opencv-python-headless -y && "
+        log.error("  [ERROR] cv2.namedWindow failed — opencv-python-headless may be installed.")
+        log.error("  [FIX]   pip uninstall opencv-python-headless -y && "
               "pip install --force-reinstall opencv-python")
     _is_fullscreen = False
     _stop = False  # shared stop flag for X button / Q key
@@ -304,50 +332,76 @@ def run_pipeline(
 
     try:
         with VideoCapture(source, camera_id=camera_id) as cap:
-            print(f"  Source: {cap}\n")
+            log.info(f"  Source: {cap}\n")
+
+            # A single bad frame (corrupt capture, transient CUDA error, one
+            # unexpected exception anywhere in layers 2-7) must not kill a
+            # live run — it gets logged with its traceback and skipped. But
+            # if EVERY frame is failing, something systemic is wrong and
+            # limping on silently would hide it: abort after ~3s of
+            # continuous failure.
+            consecutive_failures = 0
+            MAX_CONSECUTIVE_FAILURES = 90
 
             for frame_seq, timestamp, original_frame in cap.frames():
 
-                # Layer 2: Preprocess
-                ctx = preprocessor.process(
-                    original_frame,
-                    camera_id=camera_id,
-                    timestamp=timestamp,
-                    frame_seq=frame_seq
-                )
+                try:
+                    # Layer 2: Preprocess
+                    ctx = preprocessor.process(
+                        original_frame,
+                        camera_id=camera_id,
+                        timestamp=timestamp,
+                        frame_seq=frame_seq
+                    )
 
-                # Layer 3: Detect
-                ctx = detector.detect(ctx)
+                    # Layer 3: Detect
+                    ctx = detector.detect(ctx)
 
-                # Layer 4: Identity (optional)
-                if identifier is not None:
-                    ctx = identifier.identify(ctx)
+                    # Layer 4: Identity (optional)
+                    if identifier is not None:
+                        ctx = identifier.identify(ctx)
 
-                # Layer 5: Expression (optional)
-                if analyser is not None:
-                    ctx = analyser.analyse(ctx)
-                    # Drop throttle/smoothing state for ended tracks so
-                    # per-track buffers don't grow forever in long sessions.
-                    if frame_seq % 100 == 0:
-                        active_ids = {d.track_id for d in ctx.detections
-                                      if d.track_id is not None}
-                        analyser.clear_stale_tracks(active_ids)
+                    # Layer 5: Expression (optional)
+                    if analyser is not None:
+                        ctx = analyser.analyse(ctx)
+                        # Drop throttle/smoothing state for ended tracks so
+                        # per-track buffers don't grow forever in long sessions.
+                        if frame_seq % 100 == 0:
+                            active_ids = {d.track_id for d in ctx.detections
+                                          if d.track_id is not None}
+                            analyser.clear_stale_tracks(active_ids)
 
-                # Layers 6 + 7: Analytics → Storage (optional)
-                if aggregator is not None:
-                    for event in aggregator.process(ctx):
-                        et = event["event_type"]
-                        if et == "presence_alert":
-                            who = event["identity_label"] or "unknown"
-                            print(f"  [Layer6] Track {event['track_id']} "
-                                  f"({who}) {event['presence']}")
-                        elif et == "threshold_alert":
-                            who = event["identity_label"] or "unknown"
-                            print(f"  [Layer6] ALERT track {event['track_id']} "
-                                  f"({who}): {event['metric']} = "
-                                  f"{event['value']} > {event['threshold']}")
-                        # live_expression_update events are for Layer 8
-                        # (WebSocket push) — not printed to keep console quiet.
+                    # Layers 6 + 7: Analytics → Storage (optional)
+                    if aggregator is not None:
+                        for event in aggregator.process(ctx):
+                            et = event["event_type"]
+                            if et == "presence_alert":
+                                who = event["identity_label"] or "unknown"
+                                log.info(f"  [Layer6] Track {event['track_id']} "
+                                         f"({who}) {event['presence']}")
+                            elif et == "threshold_alert":
+                                who = event["identity_label"] or "unknown"
+                                log.warning(f"  [Layer6] ALERT track "
+                                            f"{event['track_id']} ({who}): "
+                                            f"{event['metric']} = "
+                                            f"{event['value']} > {event['threshold']}")
+                            # live_expression_update events are for Layer 8
+                            # (WebSocket push) — not printed to keep console quiet.
+
+                except Exception:
+                    consecutive_failures += 1
+                    log.exception(f"  [Pipeline] frame {frame_seq} failed "
+                                  f"({consecutive_failures} consecutive) — "
+                                  f"skipping frame")
+                    if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                        log.critical(
+                            f"  [Pipeline] {MAX_CONSECUTIVE_FAILURES} frames "
+                            f"failed in a row — something is systemically "
+                            f"broken. Stopping. See logs/watcher.log for the "
+                            f"tracebacks.")
+                        break
+                    continue
+                consecutive_failures = 0
 
                 # FPS
                 fps_count += 1
@@ -374,7 +428,7 @@ def run_pipeline(
                         os.makedirs("output", exist_ok=True)
                         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
                         writer = cv2.VideoWriter(output_path, fourcc, cap.fps, (fw_w, fh_w))
-                        print(f"  [Validate] Saving → {output_path}")
+                        log.info(f"  [Validate] Saving → {output_path}")
                         writer_ready = True
                     if writer is not None:
                         writer.write(display)
@@ -389,7 +443,7 @@ def run_pipeline(
                 # reliability on Windows + OpenCV builds.
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord("q") or key == 27:  # Q or ESC
-                    print("\n  Stopped by user (Q / ESC key).")
+                    log.info("\n  Stopped by user (Q / ESC key).")
                     _stop = True
                 elif key == ord("f") and _gui_window:
                     _is_fullscreen = not _is_fullscreen
@@ -403,7 +457,7 @@ def run_pipeline(
                         # WND_PROP_AUTOSIZE: -1.0 = window no longer exists
                         auto = cv2.getWindowProperty(WIN_NAME, cv2.WND_PROP_AUTOSIZE)
                         if vis < 0 or auto < 0:
-                            print("\n  Window closed by user (X button). Stopping.")
+                            log.info("\n  Window closed by user (X button). Stopping.")
                             _stop = True
                     except cv2.error:
                         _stop = True
@@ -415,22 +469,53 @@ def run_pipeline(
         if writer is not None:
             writer.release()
             if output_path:
-                print(f"  Annotated video saved → {output_path}")
+                log.info(f"  Annotated video saved → {output_path}")
         if aggregator is not None:
             aggregator.close()  # close appearances + finalise sessions → L7
         if storage is not None:
             storage.close()
-            print(f"\n  [Layer7] Persisted: {storage.n_sessions} sessions, "
+            log.info(f"\n  [Layer7] Persisted: {storage.n_sessions} sessions, "
                   f"{storage.n_appearances} appearances, "
                   f"{storage.n_expression_events} expression events, "
                   f"{storage.n_presence_events} presence events "
                   f"→ {storage.db_path}")
         cv2.destroyAllWindows()
 
-    print(f"\n  Session complete. Processed {frame_seq + 1} frames.\n")
+    log.info(f"\n  Session complete. Processed {frame_seq + 1} frames.\n")
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
+
+def _log_environment():
+    """
+    Startup preflight, written to the log (file always; console only for
+    problems). Answers the question that cost us a demo: is every model this
+    run needs already on disk, or will something try to reach the internet?
+    """
+    import platform
+    log.debug(f"python {platform.python_version()} on {platform.platform()}")
+    log.debug(f"torch {torch.__version__}, cuda available: "
+              f"{torch.cuda.is_available()}")
+
+    home = os.path.expanduser("~")
+    checks = [
+        ("YOLO face model (Layer 3)", "models/yolov8n-face.pt"),
+        ("InsightFace pack (Layer 4)",
+         os.path.join(home, ".insightface", "models", "buffalo_l")),
+        ("hsemotion cache (Layer 5)", os.path.join(home, ".hsemotion")),
+    ]
+    for label, path in checks:
+        if os.path.isdir(path):
+            n = len(os.listdir(path))
+            log.debug(f"preflight OK  : {label} — {path} ({n} files)")
+        elif os.path.isfile(path):
+            mb = os.path.getsize(path) / 1e6
+            log.debug(f"preflight OK  : {label} — {path} ({mb:.0f} MB)")
+        else:
+            log.warning(f"  [Preflight] {label} NOT found at {path} — "
+                        f"first use will attempt a download, which REQUIRES "
+                        f"INTERNET. Offline, that layer will be disabled.")
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -457,9 +542,16 @@ def main():
 
     args = parser.parse_args()
 
+    # Logging FIRST — from here on, every message and every crash traceback
+    # lands in logs/watcher.log as well as the console.
+    setup_logging()
+    log.debug(f"argv: {sys.argv}")
+
     enable_identity = not args.no_identity
     enable_expression = not args.no_expression
     enable_analytics = not args.no_analytics
+
+    _log_environment()
 
     print_banner(enable_identity, enable_expression, enable_analytics)
 
@@ -474,12 +566,12 @@ def main():
     else:
         source, camera_id = select_source()
 
-    print(f"\n  Source confirmed : {source}")
-    print(f"  Camera ID        : {camera_id}")
-    print(f"  Validate mode    : {'ON' if args.validate else 'OFF'}")
-    print(f"  Layer 4 Identity : {'ON' if enable_identity else 'OFF (--no-identity)'}")
-    print(f"  Layer 5 Expression: {'ON' if enable_expression else 'OFF (--no-expression)'}")
-    print(f"  Layers 6+7 Analytics/Storage: "
+    log.info(f"\n  Source confirmed : {source}")
+    log.info(f"  Camera ID        : {camera_id}")
+    log.info(f"  Validate mode    : {'ON' if args.validate else 'OFF'}")
+    log.info(f"  Layer 4 Identity : {'ON' if enable_identity else 'OFF (--no-identity)'}")
+    log.info(f"  Layer 5 Expression: {'ON' if enable_expression else 'OFF (--no-expression)'}")
+    log.info(f"  Layers 6+7 Analytics/Storage: "
           f"{'ON' if enable_analytics else 'OFF (--no-analytics)'}")
 
     run_pipeline(
