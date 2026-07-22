@@ -249,6 +249,7 @@ class StorageLayer:
         )
         self._conn.commit()
         self.n_sessions += 1
+        log.debug(f"[Layer7] session opened: {record['session_id']}")
 
     def close_session(self, record: dict):
         """

@@ -386,6 +386,7 @@ class FaceTracker:
             # this track already carries (if any), else mint a fresh one.
             pinned = current if current is not None else self._new_display_id()
             self._identity_to_display[identity_key] = pinned
+            log.debug(f"[Layer4-Tracker] display ID {pinned} pinned to identity {identity_key}")
 
         if current is not None and current != pinned:
             # Track was numbered before FAISS recognised it — retire the
@@ -403,8 +404,12 @@ class FaceTracker:
         display_id = self._ds_to_display.get(ds_id)
         if display_id is None:
             display_id = self._match_departed(embedding, now)
-            if display_id is None:
+            if display_id is not None:
+                log.debug(f"[Layer4-Tracker] display ID {display_id} re-acquired via embedding gallery")
+            else:
                 display_id = self._new_display_id()
+                log.debug(f"[Layer4-Tracker] new display ID {display_id} minted "
+                          f"({'no embedding' if embedding is None else 'no gallery match'})")
             self._ds_to_display[ds_id] = display_id
             self._active_info[display_id] = {"emb": None, "last_seen": now}
 

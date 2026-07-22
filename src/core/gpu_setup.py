@@ -66,6 +66,9 @@ def register_nvidia_dlls():
     except Exception:
         pass
 
+    from src.core.logger import get_logger
+    _log = get_logger("watcher.gpu")
+    _log.debug(f"registering NVIDIA DLL dirs: {dll_dirs}")
     for d in dll_dirs:
         try:
             os.add_dll_directory(d)
