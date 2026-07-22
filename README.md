@@ -25,8 +25,8 @@ The Watcher is a modular, 9-layer computer vision pipeline that ingests live cam
 | **5** | Expression Analysis (hsemotion-onnx) | ✅ Done |
 | **6** | Analytics & Business Logic (session metrics + alerts) | ✅ Done |
 | **7** | Storage (SQLite MVP; PostgreSQL/TimescaleDB at scale) | ✅ Done |
-| 8 | API (FastAPI) | 🔜 Planned |
-| 9 | Frontend Dashboard | 🔜 Planned |
+| **8** | API (FastAPI — read endpoints + /docs live) | 🔨 Scaffold |
+| **9** | Frontend Dashboard (placeholder; design in progress) | 🔨 Scaffold |
 
 ---
 
@@ -155,6 +155,13 @@ python main.py
 ```powershell
 python main.py --validate
 ```
+
+### API + dashboard (Layers 8-9 scaffold)
+```powershell
+python run_api.py    # dashboard at http://127.0.0.1:8000  |  API docs at /docs
+```
+Runs alongside the pipeline — the database is read-only to the API and the
+pipeline writes in WAL mode, so both can run at the same time.
 
 ### Direct source (skip menu)
 ```powershell
