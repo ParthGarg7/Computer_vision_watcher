@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "watcher-api",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["run_api.py"],
+      "port": 8000
+    }
+  ]
+}

@@ -60,3 +60,9 @@ hsemotion-onnx
 # CUDA DLLs are provided by the PyTorch install; src/core/gpu_setup.py
 # registers them on the Windows DLL search path automatically.
 onnxruntime>=1.18.0
+
+# ─── Layer 8: REST API + Layer 9 dashboard server ────────────────────────────
+# FastAPI serves the read API over stored sessions; uvicorn runs it.
+# Start with: python run_api.py  →  http://127.0.0.1:8000
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
