@@ -14,7 +14,7 @@
 
 The Watcher is a modular, 9-layer computer vision pipeline that ingests live camera streams or recorded video, detects faces in real time, identifies individuals, analyses expressions, and persists the results to a structured database. All processing runs locally on a single machine.
 
-**MVP Status (v0.5.0-alpha): Layers 1–7 are complete and working.**
+**MVP Status (v0.9.0-alpha): all 9 layers are complete and working.**
 
 | Layer | Name | Status |
 |-------|------|--------|
@@ -25,8 +25,8 @@ The Watcher is a modular, 9-layer computer vision pipeline that ingests live cam
 | **5** | Expression Analysis (hsemotion-onnx) | ✅ Done |
 | **6** | Analytics & Business Logic (session metrics + alerts) | ✅ Done |
 | **7** | Storage (SQLite MVP; PostgreSQL/TimescaleDB at scale) | ✅ Done |
-| **8** | API (FastAPI — read endpoints + /docs live) | 🔨 Scaffold |
-| **9** | Frontend Dashboard (placeholder; design in progress) | 🔨 Scaffold |
+| **8** | API (FastAPI — REST + WebSocket + registration) | ✅ Done |
+| **9** | Dashboard (React + TypeScript + three.js) | ✅ Done |
 
 ---
 
@@ -156,12 +156,22 @@ python main.py
 python main.py --validate
 ```
 
-### API + dashboard (Layers 8-9 scaffold)
+### API + dashboard (Layers 8-9)
 ```powershell
 python run_api.py    # dashboard at http://127.0.0.1:8000  |  API docs at /docs
 ```
-Runs alongside the pipeline — the database is read-only to the API and the
-pipeline writes in WAL mode, so both can run at the same time.
+Run it alongside the pipeline: the API opens the database read-only and the
+pipeline writes in WAL mode, so both run at once. With `python main.py`
+running, the dashboard shows live tracks, moods and alerts over a WebSocket.
+
+The built bundle is committed, so this works without Node installed. To
+**edit** the dashboard you need Node 18+:
+```powershell
+cd src/layer9_dashboard
+npm install
+npm run dev      # hot reload on :5173, proxies /api and /ws to :8000
+npm run build    # rebuild the bundle run_api.py serves
+```
 
 ### Direct source (skip menu)
 ```powershell

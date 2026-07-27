@@ -137,7 +137,20 @@ CREATE TABLE IF NOT EXISTS presence_events (
 );
 CREATE INDEX IF NOT EXISTS idx_presence_ts      ON presence_events (timestamp);
 CREATE INDEX IF NOT EXISTS idx_presence_session ON presence_events (session_id);
+
+-- Live event bus between the pipeline process and the API process.
+-- Not history: a short rolling buffer the WebSocket endpoint tails.
+CREATE TABLE IF NOT EXISTS live_events (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp  REAL NOT NULL,
+    event_type TEXT NOT NULL,
+    payload    TEXT NOT NULL     -- JSON, forwarded to clients verbatim
+);
 """
+
+# Live events kept in the rolling buffer. The WebSocket only ever wants the
+# newest few; anything older is history's job (the tables above).
+LIVE_BUFFER_MAX = 400
 
 
 class StorageLayer:
@@ -191,6 +204,7 @@ class StorageLayer:
         self.n_appearances = 0
         self.n_expression_events = 0
         self.n_presence_events = 0
+        self.n_live_events = 0
 
         removed = self.clear_unregistered() if clear_unregistered else 0
 
@@ -327,6 +341,57 @@ class StorageLayer:
         )
         self._conn.commit()
         self.n_presence_events += 1
+
+    # ─── Live event bus (pipeline process -> API process) ─────────────────────
+
+    def publish_live_event(self, event: dict):
+        """
+        Push one Layer 6 real-time event onto the live bus.
+
+        The pipeline and the API run as SEPARATE PROCESSES, so the events
+        Layer 6 generates cannot be handed to the WebSocket by a function
+        call. The Arch Doc (§2) specifies Redis pub/sub for this at MVP;
+        this uses the SQLite database already shared between the two, which
+        needs no extra service and keeps the offline-first guarantee. WAL
+        mode means the API can read while the pipeline writes.
+
+        Trade-off: the API polls this table (~250ms) instead of being pushed
+        to, so live updates carry that much latency. Fine for a dashboard,
+        and swapping in Redis later means reimplementing only this method
+        and its reader.
+        """
+        cur = self._conn.execute(
+            "INSERT INTO live_events (timestamp, event_type, payload) "
+            "VALUES (?,?,?)",
+            (event.get("timestamp", time.time()), event["event_type"],
+             json.dumps(event)),
+        )
+        self.n_live_events += 1
+        # Trim occasionally rather than every insert — this is on the frame path.
+        if cur.lastrowid and cur.lastrowid % 100 == 0:
+            self._conn.execute(
+                "DELETE FROM live_events WHERE id <= ?",
+                (cur.lastrowid - LIVE_BUFFER_MAX,),
+            )
+        self._conn.commit()
+
+    def read_live_events(self, after_id: int = 0, limit: int = 100) -> list:
+        """Events newer than `after_id`, oldest first. Used by the API's WS."""
+        cur = self._conn.execute(
+            "SELECT id, payload FROM live_events WHERE id > ? "
+            "ORDER BY id LIMIT ?", (after_id, limit))
+        out = []
+        for row_id, payload in cur.fetchall():
+            try:
+                out.append((row_id, json.loads(payload)))
+            except json.JSONDecodeError:
+                continue
+        return out
+
+    def latest_live_id(self) -> int:
+        """Highest live-event id, so a new client can start from 'now'."""
+        row = self._conn.execute("SELECT MAX(id) FROM live_events").fetchone()
+        return row[0] or 0
 
     def flush(self):
         """Flush buffered expression events with a single executemany()."""

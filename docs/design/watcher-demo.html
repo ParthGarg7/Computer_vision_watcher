@@ -1,0 +1,1153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Watcher — Layout Demos</title>
+<style>
+/* =========================================================================
+   THE WATCHER — dashboard layout demos (A / B / C)
+   Single self-contained file. No external libs, no CDN, works offline.
+   Pure CSS + vanilla JS. Charts via <canvas>. 3D head via CSS transforms.
+   ========================================================================= */
+
+:root{
+  color-scheme: dark;
+  /* DARK — deep purple-tinted control room (reference: chrome + neon) */
+  --bg:        oklch(0.11 0.006 260);
+  --bg-2:      oklch(0.15 0.010 260);
+  --panel:     oklch(0.21 0.03 255 / 0.55);   /* translucent glass */
+  --panel-solid: oklch(0.19 0.028 255);
+  --panel-2:   oklch(0.25 0.035 255 / 0.6);
+  --line:      oklch(0.55 0.06 255 / 0.32);
+  --ink:       oklch(0.96 0.01 255);
+  --ink-dim:   oklch(0.78 0.03 255);
+  --ink-faint: oklch(0.60 0.04 255);
+  /* Black-blue base + multi-colour accents */
+  --acc-cyan:  oklch(0.82 0.14 200);   /* cyan   */
+  --acc-amber: oklch(0.80 0.16 75);    /* amber  */
+  --acc-mag:   oklch(0.70 0.18 250);   /* electric blue (primary glow) */
+  --acc-violet:oklch(0.62 0.16 275);   /* indigo */
+  --acc-blue:  oklch(0.68 0.19 245);   /* blue   */
+  --good:      oklch(0.80 0.16 165);
+  --warn:      oklch(0.80 0.16 75);
+  --bad:       oklch(0.66 0.22 20);
+  --chrome:    linear-gradient(135deg, oklch(0.9 0.02 250), oklch(0.55 0.05 250) 45%, oklch(0.82 0.03 240));
+  --page-glow: radial-gradient(1000px 560px at 60% 120%, oklch(0.48 0.20 250 / .40), transparent 70%);
+  --panel-shadow: 0 0 0 1px oklch(1 0 0 / .04) inset, 0 10px 34px oklch(0 0 0 / .40);
+  --grid: oklch(1 0 0 / .07);
+  --trace: oklch(1 0 0 / .09);
+  --dot:  oklch(0.62 0.16 250 / 0.22);   /* dot-matrix background */
+  --edge: oklch(0.66 0.18 248 / 0.55);   /* dashed boundary */
+  --radius: 12px;
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+[data-theme="light"]{
+  color-scheme: light;
+  /* LIGHT — bright chrome studio, same neon accents (a touch deeper for contrast) */
+  --bg:        oklch(0.95 0.012 250);
+  --bg-2:      oklch(0.98 0.008 250);
+  --panel:     oklch(1 0 0 / 0.62);
+  --panel-solid: oklch(0.99 0.005 250);
+  --panel-2:   oklch(0.97 0.012 250 / 0.72);
+  --line:      oklch(0.50 0.05 250 / 0.28);
+  --ink:       oklch(0.24 0.03 255);
+  --ink-dim:   oklch(0.44 0.04 255);
+  --ink-faint: oklch(0.56 0.03 255);
+  --acc-mag:   oklch(0.52 0.19 250);
+  --acc-violet:oklch(0.50 0.17 275);
+  --acc-blue:  oklch(0.52 0.19 245);
+  --good:      oklch(0.58 0.16 165);
+  --bad:       oklch(0.56 0.22 22);
+  --page-glow: radial-gradient(1000px 520px at 62% 118%, oklch(0.72 0.15 250 / .28), transparent 70%);
+  --panel-shadow: 0 0 0 1px oklch(1 0 0 / .5) inset, 0 8px 26px oklch(0.4 0.05 300 / .18);
+  --grid: oklch(0 0 0 / .08);
+  --trace: oklch(0 0 0 / .07);
+  --dot:  oklch(0.50 0.14 250 / 0.20);
+  --edge: oklch(0.52 0.18 248 / 0.5);
+}
+
+*{ box-sizing:border-box; }
+html,body{ margin:0; height:100%; }
+body{
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size:14px;
+  -webkit-font-smoothing:antialiased;
+  overflow:hidden;
+  transition: background .4s, color .3s;
+}
+/* layered background: light-pillar shader, then dot grid, then the app */
+#bgfx{ position:fixed; inset:0; z-index:0; width:100%; height:100%; display:block; }
+#bggrid{ position:fixed; inset:0; z-index:1; pointer-events:none;
+  background: radial-gradient(var(--dot) 1px, transparent 1.6px) 0 0 / 22px 22px; }
+a{ color: var(--acc-cyan); }
+a:hover{ color: var(--acc-amber); }
+
+/* ---------- App shell ---------- */
+#app{ display:flex; flex-direction:column; height:100vh; position:relative; z-index:2; }
+
+/* Top bar with direction switcher */
+#topbar{
+  display:flex; align-items:center; gap:16px;
+  padding:0 16px; height:52px; flex:0 0 auto;
+  background: transparent;
+  border-bottom:1px dashed var(--edge);
+}
+#brand{ display:flex; align-items:center; gap:10px; font-weight:600; letter-spacing:.02em; }
+#brand .dot{
+  width:10px; height:10px; border-radius:50%;
+  background: var(--good);
+  box-shadow:0 0 0 4px color-mix(in oklch, var(--good) 22%, transparent);
+  animation: pulse 2.4s ease-in-out infinite;
+}
+@keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.35} }
+#brand small{ color:var(--ink-faint); font-family:var(--mono); font-weight:400; }
+
+.switcher{ display:flex; gap:4px; margin-left:auto; background:var(--panel); padding:4px; border-radius:var(--radius); border:1px solid var(--line); }
+.switcher button{
+  font-family:var(--mono); font-size:12px; color:var(--ink-dim);
+  background:transparent; border:0; padding:7px 14px; border-radius:7px; cursor:pointer;
+  transition: background .15s, color .15s;
+}
+.switcher button:hover{ color:var(--ink); }
+.switcher button.on{ background:var(--panel-2); color:var(--ink); box-shadow:0 1px 0 rgba(0,0,0,.3); }
+.clock{ font-family:var(--mono); font-size:12px; color:var(--ink-dim); }
+
+/* Stage that holds whichever layout is active */
+#stage{ flex:1 1 auto; min-height:0; padding:14px; }
+
+/* ---------- Generic panel ---------- */
+.panel{
+  background: var(--panel);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  border:1px dashed var(--edge);
+  border-radius: var(--radius);
+  box-shadow: var(--panel-shadow);
+  display:flex; flex-direction:column; min-height:0; min-width:0;
+}
+.panel > h3{
+  margin:0; padding:11px 14px; flex:0 0 auto;
+  font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink-faint);
+  font-weight:600; border-bottom:1px solid var(--line);
+  display:flex; align-items:center; gap:8px;
+}
+.panel > h3 .count{ margin-left:auto; font-family:var(--mono); color:var(--ink-dim); }
+.panel .body{ padding:12px 14px; overflow:auto; flex:1 1 auto; min-height:0; }
+.panel .body.tight{ padding:0; }
+
+/* ---------- Live camera ---------- */
+.cam{
+  position:relative; overflow:hidden; border-radius:var(--radius);
+  background:
+    repeating-linear-gradient(45deg,
+      oklch(0.24 0.02 250) 0 10px,
+      oklch(0.22 0.02 250) 10px 20px);
+  border:1px solid var(--line);
+  cursor:pointer; min-height:0;
+}
+.cam::after{ /* scanline sheen */
+  content:""; position:absolute; inset:0; pointer-events:none;
+  background:linear-gradient(180deg, transparent 0%, rgba(0,0,0,.25) 100%);
+  mix-blend-mode:multiply;
+}
+.cam .rec{
+  position:absolute; top:10px; left:10px; z-index:3;
+  display:flex; align-items:center; gap:7px;
+  font-family:var(--mono); font-size:11px; color:var(--ink);
+  background:rgba(0,0,0,.45); padding:5px 9px; border-radius:6px;
+}
+.cam .rec .dot{ width:8px; height:8px; border-radius:50%; background:var(--bad); animation:pulse 1.4s infinite; }
+.cam .expand-hint{
+  position:absolute; bottom:10px; right:12px; z-index:3;
+  font-family:var(--mono); font-size:10px; color:var(--ink-dim);
+  background:rgba(0,0,0,.4); padding:4px 8px; border-radius:6px;
+}
+.cam .placeholder{
+  position:absolute; inset:0; display:flex; flex-direction:column; gap:6px;
+  align-items:center; justify-content:center; z-index:2;
+  font-family:var(--mono); font-size:12px; color:var(--ink-faint); text-align:center;
+}
+/* Detection boxes drawn over the feed */
+.detbox{
+  position:absolute; z-index:2; border:1.5px solid var(--acc-cyan);
+  border-radius:3px; box-shadow:0 0 0 1px rgba(0,0,0,.4);
+  transition: all .8s cubic-bezier(.4,0,.2,1);
+}
+.detbox .tag{
+  position:absolute; top:-20px; left:-1px; white-space:nowrap;
+  font-family:var(--mono); font-size:10px; padding:2px 6px; border-radius:4px 4px 4px 0;
+  background:var(--acc-cyan); color:oklch(0.17 0.012 250); font-weight:600;
+}
+.detbox.stranger{ border-color:var(--warn); }
+.detbox.stranger .tag{ background:var(--warn); }
+
+/* Fullscreen camera overlay */
+#camModal{
+  position:fixed; inset:0; z-index:50; display:none;
+  background:oklch(0.12 0.01 250 / .82); backdrop-filter:blur(6px);
+  padding:36px;
+}
+#camModal.open{ display:flex; gap:16px; }
+#camModal .big-cam{ flex:1 1 auto; }
+#camModal .cam-side{ flex:0 0 300px; display:flex; flex-direction:column; gap:12px; overflow:auto; }
+#camModal .closex{
+  position:absolute; top:16px; right:20px; z-index:60;
+  font-family:var(--mono); font-size:12px; color:var(--ink);
+  background:var(--panel); border:1px solid var(--line); border-radius:7px;
+  padding:8px 12px; cursor:pointer;
+}
+
+/* ---------- 3D mood head (CSS transforms) ---------- */
+.head-stage{
+  perspective:640px; display:flex; align-items:center; justify-content:center;
+  flex:1 1 auto; min-height:180px; position:relative;
+}
+.head{
+  position:relative; width:120px; height:150px;
+  transform-style:preserve-3d;
+  animation: spin 14s linear infinite;
+}
+@keyframes spin{ from{transform:rotateY(0)} to{transform:rotateY(360deg)} }
+/* Head is a stack of elliptical "contour" rings rotated in 3D — a wireframe skull-ish form */
+.head .ring{
+  position:absolute; left:50%; top:50%;
+  border:1px solid var(--acc-mag);
+  border-radius:50%;
+  transform-style:preserve-3d;
+  opacity:.6;
+  box-shadow:0 0 8px -2px var(--acc-mag);
+}
+.head .axis{
+  position:absolute; left:50%; top:0; width:1px; height:100%;
+  background:linear-gradient(var(--acc-cyan), transparent);
+  transform:translateX(-50%);
+  opacity:.4;
+}
+.head .core{
+  position:absolute; left:50%; top:50%; width:30px; height:30px; margin:-15px;
+  border-radius:50%; background:var(--acc-mag);
+  filter:blur(2px); opacity:.9;
+  box-shadow:0 0 34px 8px color-mix(in oklch, var(--acc-mag) 55%, transparent);
+}
+.mood-label{
+  position:absolute; bottom:8px; left:0; right:0; text-align:center;
+  font-family:var(--mono); font-size:12px; color:var(--ink-dim);
+}
+.mood-label b{ color:var(--ink); }
+
+/* ---------- Now-present cards ---------- */
+.now-list{ display:flex; flex-direction:column; gap:8px; }
+.person{
+  display:flex; align-items:center; gap:11px; padding:9px 10px;
+  background:var(--panel-2); border:1px solid var(--line); border-radius:8px;
+  cursor:pointer; transition:transform .12s, border-color .12s;
+}
+.person:hover{ transform:translateX(2px); border-color:var(--acc-cyan); }
+.person.sel{ border-color:var(--acc-mag); box-shadow:0 0 0 1px var(--acc-mag), 0 0 18px -4px var(--acc-mag); }
+.avatar{
+  width:38px; height:38px; border-radius:8px; flex:0 0 auto;
+  display:flex; align-items:center; justify-content:center;
+  font-family:var(--mono); font-weight:600; font-size:14px;
+  background:var(--bg-2); border:1px solid var(--line);
+}
+.person .meta{ min-width:0; flex:1 1 auto; }
+.person .meta .nm{ font-weight:600; display:flex; align-items:center; gap:7px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.person .meta .sub{ font-size:12px; color:var(--ink-faint); font-family:var(--mono); }
+.chip{ font-family:var(--mono); font-size:10px; padding:2px 7px; border-radius:20px; border:1px solid var(--line); color:var(--ink-dim); }
+.chip.mood{ border-color:transparent; color:oklch(0.17 0.012 250); font-weight:600; flex:0 0 auto; }
+
+/* ---------- Stat tiles ---------- */
+.stats{ display:grid; grid-template-columns:repeat(auto-fit,minmax(96px,1fr)); gap:8px; }
+.stat{ background:var(--panel-2); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+.stat .v{ font-size:22px; font-weight:600; font-family:var(--mono); }
+.stat .k{ font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint); margin-top:2px; }
+
+/* ---------- Sessions table ---------- */
+table{ width:100%; border-collapse:collapse; font-size:13px; }
+th,td{ text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); }
+th{ font-size:10px; letter-spacing:.07em; text-transform:uppercase; color:var(--ink-faint); font-weight:600; position:sticky; top:0; background:var(--panel); }
+td.mono,th.mono{ font-family:var(--mono); }
+tr:hover td{ background:var(--panel-2); }
+
+/* ---------- Emotion bars ---------- */
+.ebars{ display:flex; flex-direction:column; gap:7px; }
+.ebar{ display:grid; grid-template-columns:74px 1fr 38px; align-items:center; gap:9px; font-size:12px; }
+.ebar .lab{ color:var(--ink-dim); font-family:var(--mono); }
+.ebar .track{ height:8px; background:var(--bg-2); border-radius:20px; overflow:hidden; }
+.ebar .fill{ height:100%; border-radius:20px; transition:width .5s; }
+.ebar .pct{ font-family:var(--mono); color:var(--ink-dim); text-align:right; }
+
+/* ---------- Valence/Arousal pad ---------- */
+.pad{ position:relative; aspect-ratio:1; width:100%; max-width:220px; margin:0 auto;
+  background:
+    radial-gradient(circle at 50% 50%, transparent 60%, oklch(0.2 0.01 250) 100%),
+    var(--bg-2);
+  border:1px solid var(--line); border-radius:10px; }
+.pad .cross{ position:absolute; background:var(--line); }
+.pad .cross.h{ left:0; right:0; top:50%; height:1px; }
+.pad .cross.v{ top:0; bottom:0; left:50%; width:1px; }
+.pad .lab{ position:absolute; font-family:var(--mono); font-size:9px; color:var(--ink-faint); }
+.pad .lab.t{ top:5px; left:50%; transform:translateX(-50%); }
+.pad .lab.b{ bottom:5px; left:50%; transform:translateX(-50%); }
+.pad .lab.l{ left:5px; top:50%; transform:translateY(-50%); }
+.pad .lab.r{ right:5px; top:50%; transform:translateY(-50%); }
+.pad .pt{ position:absolute; width:12px; height:12px; margin:-6px; border-radius:50%;
+  background:var(--acc-amber); box-shadow:0 0 0 4px color-mix(in oklch,var(--acc-amber) 25%,transparent);
+  transition:left .6s, top .6s; }
+
+canvas{ display:block; width:100%; }
+
+/* ---------- Health ---------- */
+.health{ display:flex; align-items:center; gap:9px; font-family:var(--mono); font-size:12px; color:var(--ink-dim); }
+.health .led{ width:9px; height:9px; border-radius:50%; background:var(--good); box-shadow:0 0 8px var(--good); }
+
+/* ---------- Layout grids per direction ---------- */
+.layout{ height:100%; display:grid; gap:14px; }
+
+/* A: camera-first — left cam | center now+head | right charts */
+.layout.A{ grid-template-columns: 360px 1.2fr 1fr; grid-template-rows:1fr 1fr; }
+.A .a-cam{ grid-row:1 / span 2; }
+.A .a-now{ }
+.A .a-head{ }
+.A .a-chart{ grid-column:3; grid-row:1 / span 2; }
+.A .a-sessions{ grid-column:2; grid-row:2; }
+
+/* B: slim docked cam on right + drawer; dashboard grid on left */
+.layout.B{ grid-template-columns: 1.4fr 1fr 190px; grid-template-rows:auto 1fr 1fr; }
+.B .b-stats{ grid-column:1 / span 2; }
+.B .b-sessions{ grid-column:1; grid-row:2 / span 2; }
+.B .b-focus{ grid-column:2; grid-row:2; }
+.B .b-chart{ grid-column:2; grid-row:3; }
+.B .b-cam{ grid-column:3; grid-row:1 / span 3; }
+
+/* C: focus cockpit — big head center, widgets on edges */
+.layout.C{ grid-template-columns: 260px 1fr 260px; grid-template-rows:auto 1fr auto; }
+.C .c-now{ grid-column:1; grid-row:1 / span 2; }
+.C .c-focus{ grid-column:2; grid-row:1 / span 2; }
+.C .c-cam{ grid-column:3; grid-row:1; }
+.C .c-pad{ grid-column:3; grid-row:2; }
+.C .c-chart{ grid-column:1 / span 3; grid-row:3; }
+
+/* ---------- WebGL 3D head ---------- */
+.head-stage{ position:relative; }
+.head-canvas{ position:absolute; inset:0; width:100%; height:100%; display:block; cursor:grab; touch-action:none; }
+.head-canvas:active{ cursor:grabbing; }
+
+/* ---------- Tweaks panel ---------- */
+#tweaks{ position:fixed; right:16px; bottom:16px; z-index:40; width:252px;
+  background:var(--panel); backdrop-filter:blur(16px) saturate(1.2); -webkit-backdrop-filter:blur(16px) saturate(1.2);
+  border:1px solid var(--line); border-radius:12px; box-shadow:var(--panel-shadow);
+  color:var(--ink); overflow:hidden; transition:transform .25s; }
+#tweaks.collapsed{ transform:translateY(calc(100% - 44px)); width:auto; }
+#tweaks.collapsed .tw-head{ white-space:nowrap; }
+#tweaks .tw-head{ display:flex; align-items:center; gap:8px; padding:12px 14px; cursor:pointer;
+  font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink-faint); font-weight:600; border-bottom:1px solid var(--line); }
+#tweaks .tw-head .gear{ color:var(--acc-mag); font-size:13px; }
+#tweaks .tw-head .chev{ margin-left:auto; font-family:var(--mono); }
+#tweaks .tw-body{ padding:13px 14px; display:flex; flex-direction:column; gap:13px; max-height:64vh; overflow:auto; }
+.tw-row{ display:flex; flex-direction:column; gap:6px; }
+.tw-row .lab{ display:flex; justify-content:space-between; font-size:11px; color:var(--ink-dim); font-family:var(--mono); }
+.tw-row input[type=range]{ width:100%; accent-color:var(--acc-mag); }
+.tw-seg{ display:flex; gap:4px; }
+.tw-seg button{ flex:1; font-family:var(--mono); font-size:11px; color:var(--ink-dim); background:var(--panel-2);
+  border:1px solid var(--line); border-radius:7px; padding:6px 4px; cursor:pointer; transition:.12s; }
+.tw-seg button.on{ color:var(--ink); border-color:var(--acc-mag); box-shadow:0 0 0 1px var(--acc-mag); }
+.tw-toggle{ display:flex; align-items:center; justify-content:space-between; font-size:12px; color:var(--ink-dim); }
+.tw-toggle .sw{ width:38px; height:22px; border-radius:20px; background:var(--panel-2); border:1px solid var(--line); position:relative; cursor:pointer; transition:.2s; flex:0 0 auto; }
+.tw-toggle .sw::after{ content:""; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:var(--ink-faint); transition:.2s; }
+.tw-toggle .sw.on{ background:var(--acc-mag); }
+.tw-toggle .sw.on::after{ left:18px; background:#fff; }
+</style>
+</head>
+<body>
+<canvas id="bgfx"></canvas>
+<div id="bggrid"></div>
+<div id="app">
+  <div id="topbar">
+    <div id="brand"><span class="dot"></span> THE WATCHER <small>local · offline</small></div>
+    <div class="switcher" id="switcher" style="margin-left:auto">
+      <button id="themeBtn" title="Toggle theme">◐ dark</button>
+    </div>
+    <div class="clock" id="clock">--:--:--</div>
+  </div>
+  <div id="stage"></div>
+</div>
+
+<!-- Fullscreen camera overlay (shared by all layouts) -->
+<div id="camModal">
+  <button class="closex" onclick="closeCam()">ESC · close</button>
+  <div class="big-cam"></div>
+  <div class="cam-side" id="camSide"></div>
+</div>
+
+<script>
+/* =========================================================================
+   1) MOCK DATA  —  REPLACE THIS BLOCK WITH real fetch() CALLS.
+   Shapes mirror the read-only JSON API. All data access lives here.
+   ========================================================================= */
+const EMOTIONS = ["happiness","neutral","anger","sadness","surprise","fear","disgust","contempt"];
+
+// color per emotion class (kept in one place for consistency)
+const EMO_COLOR = {
+  happiness:"var(--good)", neutral:"var(--acc-blue)", anger:"var(--bad)",
+  sadness:"var(--acc-violet)", surprise:"var(--acc-amber)", fear:"var(--acc-mag)",
+  disgust:"var(--acc-cyan)", contempt:"oklch(0.70 0.16 40)"
+};
+
+const MOCK = {
+  health: { connected:true, rows:18423 },
+
+  // 1) PEOPLE
+  people: [
+    { name:"Alina Reyes",  samples:14, sessions:9, totalSeconds:5240 },
+    { name:"Marcus Vail",  samples:9,  sessions:6, totalSeconds:3110 },
+    { name:"Priya Nandi",  samples:11, sessions:4, totalSeconds:1880 },
+    { name:"Unidentified", samples:0,  sessions:12, totalSeconds:2960 },
+  ],
+
+  // 2) SESSIONS (one person, one program run)
+  sessions: [
+    { id:"S-104", name:"Alina Reyes",  start:"09:12:04", end:"09:41:38", present:1210, appearances:5, mood:"pleased" },
+    { id:"S-103", name:"Unidentified", start:"09:05:51", end:"09:09:20", present:188,  appearances:2, mood:"alert"   },
+    { id:"S-102", name:"Marcus Vail",  start:"08:48:10", end:"09:22:47", present:1640, appearances:7, mood:"tense"   },
+    { id:"S-101", name:"Priya Nandi",  start:"08:31:22", end:"08:52:09", present:980,  appearances:3, mood:"relaxed" },
+    { id:"S-100", name:"Unidentified", start:"08:15:00", end:"08:17:44", present:150,  appearances:1, mood:"alert"   },
+  ],
+
+  // 4) EXPRESSION time-series per person (mock ~30 readings each)
+  expression: {},   // filled below by seedExpression()
+
+  // 6) LIVE VIEW — who is on screen right now + recent alerts
+  liveNow: [
+    { name:"Alina Reyes",  trackId:"T-07", mood:"pleased", box:{x:0.18,y:0.22,w:0.20,h:0.30} },
+    { name:"Marcus Vail",  trackId:"T-11", mood:"tense",   box:{x:0.55,y:0.30,w:0.18,h:0.28} },
+    { name:"Unidentified", trackId:"T-13", mood:"alert",   box:{x:0.40,y:0.55,w:0.14,h:0.22}, stranger:true },
+  ],
+  alerts: [
+    { t:"09:41:02", kind:"left",     who:"Priya Nandi",  level:"info" },
+    { t:"09:38:47", kind:"mood",     who:"Marcus Vail",  level:"warn", note:"sustained tense mood" },
+    { t:"09:34:10", kind:"appeared", who:"Alina Reyes",  level:"info" },
+    { t:"09:22:33", kind:"appeared", who:"Unidentified", level:"warn", note:"unrecognised face" },
+  ],
+};
+
+// derive valence/arousal & a mood label from two dims (mirrors backend)
+const MOOD_META = {
+  pleased:{ val:0.6,  aro:0.35, color:"var(--good)",      glRGB:[0.35,0.90,0.55] },
+  relaxed:{ val:0.45, aro:-0.4, color:"var(--acc-blue)",  glRGB:[0.42,0.62,1.00] },
+  alert:  { val:0.0,  aro:0.55, color:"var(--acc-amber)", glRGB:[1.00,0.72,0.30] },
+  tense:  { val:-0.5, aro:0.5,  color:"var(--bad)",       glRGB:[1.00,0.40,0.42] },
+};
+
+// Build a believable expression time-series for each named person
+function seedExpression(){
+  MOCK.people.forEach(p=>{
+    const n = 30, arr = [];
+    let base = { happiness:20, neutral:45, anger:5, sadness:8, surprise:6, fear:4, disgust:3, contempt:9 };
+    if(p.name==="Marcus Vail") base = { happiness:8, neutral:35, anger:22, sadness:10, surprise:6, fear:7, disgust:6, contempt:6 };
+    if(p.name==="Priya Nandi") base = { happiness:30, neutral:50, anger:2, sadness:6, surprise:5, fear:2, disgust:2, contempt:3 };
+    for(let i=0;i<n;i++){
+      const reading = {}; let dom="neutral", domv=-1;
+      EMOTIONS.forEach(e=>{
+        const v = Math.max(0, base[e] + (Math.sin(i/3 + e.length)*7) + (Math.random()*10-5));
+        reading[e]=v; if(v>domv){domv=v; dom=e;}
+      });
+      // normalise to percentages
+      const tot = EMOTIONS.reduce((s,e)=>s+reading[e],0);
+      EMOTIONS.forEach(e=> reading[e] = +(reading[e]/tot*100).toFixed(1));
+      arr.push({ tIndex:i, dominant:dom, confidence:reading[dom], values:reading,
+                 valence:+(Math.cos(i/5)*0.5).toFixed(2), arousal:+(Math.sin(i/4)*0.5).toFixed(2) });
+    }
+    MOCK.expression[p.name]=arr;
+  });
+}
+seedExpression();
+
+/* =========================================================================
+   2) SMALL HELPERS
+   ========================================================================= */
+const $ = (s,r=document)=>r.querySelector(s);
+const el = (tag,cls,html)=>{ const n=document.createElement(tag); if(cls)n.className=cls; if(html!=null)n.innerHTML=html; return n; };
+const initials = n => n==="Unidentified" ? "??" : n.split(" ").map(w=>w[0]).slice(0,2).join("");
+const fmtDur = s => { const m=Math.floor(s/60), sec=s%60; return m+"m "+String(sec).padStart(2,"0")+"s"; };
+const moodColor = m => (MOOD_META[m]||{}).color || "var(--ink-dim)";
+
+// currently-selected subject (drives head + charts). default = first live person
+let SELECTED = MOCK.liveNow[0].name;
+
+/* =========================================================================
+   3) REUSABLE UI PIECES (return DOM nodes so layouts can compose them)
+   ========================================================================= */
+
+// --- live camera panel (click to expand) ---
+function cameraPanel(mini){
+  const cam = el("div","cam");
+  cam.innerHTML = mini ? `<div class="rec"><span class="dot"></span> LIVE · CAM 01</div>`
+    : `
+    <div class="rec"><span class="dot"></span> LIVE · CAM 01</div>
+    <div class="placeholder">[ camera feed ]<br>webcam / video / cctv</div>
+    <div class="expand-hint">click to expand ⤢</div>`;
+  // draw detection boxes from liveNow (name tags omitted in the mini panel to avoid clutter)
+  MOCK.liveNow.forEach(p=>{
+    const b = el("div","detbox"+(p.stranger?" stranger":""));
+    b.style.left=(p.box.x*100)+"%"; b.style.top=(p.box.y*100)+"%";
+    b.style.width=(p.box.w*100)+"%"; b.style.height=(p.box.h*100)+"%";
+    if(!mini) b.innerHTML = `<span class="tag">${p.name==="Unidentified"?"? "+p.trackId:p.name+" · "+p.trackId}</span>`;
+    cam.appendChild(b);
+  });
+  cam.onclick = openCam;
+  return cam;
+}
+
+// --- 3D mood head (WebGL, see head engine below) ---
+function moodHead(){
+  const wrap = el("div","panel");
+  wrap.appendChild(el("h3",null,"Subject · 3D mood <span class='count' id='headWho'></span>"));
+  const stage = el("div","head-stage");
+  const cv = el("canvas","head-canvas");
+  stage.appendChild(cv);
+  stage.appendChild(el("div","mood-label","<span id='moodTxt'></span>"));
+  wrap.appendChild(stage);
+  // spin up the WebGL head once the canvas is laid out in the DOM
+  requestAnimationFrame(()=> initHeadGL(cv));
+  return wrap;
+}
+
+// --- now-present list ---
+function nowPanel(){
+  const p = el("div","panel");
+  p.appendChild(el("h3",null,"Present now <span class='count'>"+MOCK.liveNow.length+" tracked</span>"));
+  const body = el("div","body"); const list = el("div","now-list");
+  MOCK.liveNow.forEach(person=>{
+    const row = el("div","person"+(person.name===SELECTED?" sel":""));
+    row.dataset.name = person.name;
+    row.innerHTML = `
+      <div class="avatar">${initials(person.name)}</div>
+      <div class="meta">
+        <div class="nm">${person.name}</div>
+        <div class="sub">track ${person.trackId}${person.stranger?" · stranger":""}</div>
+      </div>
+      <span class="chip mood" style="background:${moodColor(person.mood)}">${person.mood}</span>`;
+    row.onclick = ()=> selectSubject(person.name);
+    list.appendChild(row);
+  });
+  body.appendChild(list); p.appendChild(body);
+  return p;
+}
+
+// --- stat tiles (totals) ---
+function statsPanel(){
+  const p = el("div","panel");
+  p.appendChild(el("h3",null,"Today · totals"));
+  const body = el("div","body"); const grid = el("div","stats");
+  const totalPresent = MOCK.sessions.reduce((s,x)=>s+x.present,0);
+  const tiles = [
+    ["Sessions", MOCK.sessions.length],
+    ["People", MOCK.people.filter(p=>p.name!=="Unidentified").length],
+    ["Strangers", MOCK.sessions.filter(s=>s.name==="Unidentified").length],
+    ["On-cam", fmtDur(totalPresent)],
+    ["DB rows", MOCK.health.rows.toLocaleString()],
+  ];
+  tiles.forEach(([k,v])=>{ const t=el("div","stat"); t.innerHTML=`<div class="v">${v}</div><div class="k">${k}</div>`; grid.appendChild(t); });
+  body.appendChild(grid); p.appendChild(body);
+  return p;
+}
+
+// --- sessions table ---
+function sessionsPanel(){
+  const p = el("div","panel");
+  p.appendChild(el("h3",null,"Sessions · today <span class='count'>"+MOCK.sessions.length+"</span>"));
+  const body = el("div","body tight");
+  const t = el("table");
+  t.innerHTML = `<thead><tr><th>Who</th><th class="mono">Start</th><th class="mono">Present</th><th class="mono">Appr.</th><th>Mood</th></tr></thead>`;
+  const tb = el("tbody");
+  MOCK.sessions.forEach(s=>{
+    const tr=el("tr");
+    tr.innerHTML = `<td>${s.name}</td><td class="mono">${s.start}</td><td class="mono">${fmtDur(s.present)}</td>
+      <td class="mono">${s.appearances}</td><td><span class="chip mood" style="background:${moodColor(s.mood)}">${s.mood}</span></td>`;
+    tr.onclick=()=> selectSubject(s.name);
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb); body.appendChild(t); p.appendChild(body);
+  return p;
+}
+
+// --- emotion bars for selected subject ---
+function emotionPanel(){
+  const p = el("div","panel"); p.dataset.role="emotion";
+  p.appendChild(el("h3",null,"Expression mix <span class='count' id='emoWho'></span>"));
+  const body = el("div","body"); body.id="emoBody"; p.appendChild(body);
+  return p;
+}
+
+// --- line chart of dominant-emotion confidence over time (canvas) ---
+function chartPanel(){
+  const p = el("div","panel"); p.dataset.role="chart";
+  p.appendChild(el("h3",null,"Mood over time <span class='count' id='chartWho'></span>"));
+  const body = el("div","body"); const cv = el("canvas"); cv.id="lineChart"; cv.height=180;
+  body.appendChild(cv); p.appendChild(body);
+  return p;
+}
+
+// --- valence/arousal pad ---
+function padPanel(){
+  const p = el("div","panel");
+  p.appendChild(el("h3",null,"Valence · Arousal"));
+  const body = el("div","body");
+  body.innerHTML = `<div class="pad">
+    <div class="cross h"></div><div class="cross v"></div>
+    <div class="lab t">excited</div><div class="lab b">calm</div>
+    <div class="lab l">neg</div><div class="lab r">pos</div>
+    <div class="pt" id="vaPoint"></div></div>`;
+  p.appendChild(body);
+  return p;
+}
+
+// --- health strip ---
+function healthPanel(){
+  const p = el("div","panel");
+  p.appendChild(el("h3",null,"System"));
+  const body = el("div","body");
+  body.innerHTML = `<div class="health"><span class="led"></span>
+    DB ${MOCK.health.connected?"connected":"offline"} · ${MOCK.health.rows.toLocaleString()} rows · 100% local</div>`;
+  p.appendChild(body);
+  return p;
+}
+
+/* =========================================================================
+   4) SELECTION + DYNAMIC UPDATES (head color, bars, chart, pad)
+   ========================================================================= */
+function selectSubject(name){
+  if(name==="Unidentified" && !MOCK.expression[name]) name="Unidentified";
+  SELECTED = name;
+  document.querySelectorAll(".person").forEach(r=> r.classList.toggle("sel", r.dataset.name===name));
+  refreshSubjectViews();
+}
+
+function currentMood(){
+  const live = MOCK.liveNow.find(p=>p.name===SELECTED);
+  if(live) return live.mood;
+  const sess = MOCK.sessions.find(s=>s.name===SELECTED);
+  return sess ? sess.mood : "neutral";
+}
+
+function refreshSubjectViews(){
+  const mood = currentMood();
+  const meta = MOOD_META[mood] || {val:0,aro:0,color:"var(--ink-dim)"};
+
+  // recolor 3D head + label
+  window.CUR_MOOD = mood;
+  if(window.HEADGL) HEADGL.setMood(mood);
+  const mt=$("#moodTxt"); if(mt) mt.innerHTML = `<b>${SELECTED}</b> — ${mood}`;
+  [ "#headWho","#emoWho","#chartWho" ].forEach(id=>{ const n=$(id); if(n) n.textContent=SELECTED; });
+
+  // emotion bars (last reading)
+  const series = MOCK.expression[SELECTED];
+  const emoBody = $("#emoBody");
+  if(emoBody && series){
+    const last = series[series.length-1].values;
+    const wrap = el("div","ebars");
+    EMOTIONS.slice().sort((a,b)=>last[b]-last[a]).forEach(e=>{
+      const row=el("div","ebar");
+      row.innerHTML=`<span class="lab">${e}</span>
+        <div class="track"><div class="fill" style="width:${last[e]}%;background:${EMO_COLOR[e]}"></div></div>
+        <span class="pct">${last[e].toFixed(0)}%</span>`;
+      wrap.appendChild(row);
+    });
+    emoBody.innerHTML=""; emoBody.appendChild(wrap);
+  }
+
+  // valence/arousal point
+  const pt=$("#vaPoint");
+  if(pt){ pt.style.left=((meta.val+1)/2*100)+"%"; pt.style.top=((1-(meta.aro+1)/2)*100)+"%"; pt.style.background=meta.color; }
+
+  drawLineChart();
+}
+
+// canvas line chart: dominant-emotion confidence across the series
+function drawLineChart(){
+  const cv=$("#lineChart"); if(!cv) return;
+  const series = MOCK.expression[SELECTED]; if(!series) return;
+  const dpr=window.devicePixelRatio||1;
+  const w=cv.clientWidth||cv.parentElement.clientWidth-28, h=180;
+  cv.width=w*dpr; cv.height=h*dpr; const c=cv.getContext("2d"); c.scale(dpr,dpr);
+  c.clearRect(0,0,w,h);
+  const pad={l:8,r:8,t:14,b:16}, iw=w-pad.l-pad.r, ih=h-pad.t-pad.b;
+  const cs=getComputedStyle(document.body);
+  const gridCol=cs.getPropertyValue('--grid').trim()||'rgba(255,255,255,.06)';
+  const traceCol=cs.getPropertyValue('--trace').trim()||'rgba(255,255,255,.08)';
+  const accCol=cs.getPropertyValue('--acc-mag').trim()||'#f2c14e';
+  const faintCol=cs.getPropertyValue('--ink-faint').trim()||'rgba(255,255,255,.4)';
+  // gridlines
+  c.strokeStyle=gridCol; c.lineWidth=1;
+  for(let g=0;g<=4;g++){ const y=pad.t+ih*g/4; c.beginPath(); c.moveTo(pad.l,y); c.lineTo(w-pad.r,y); c.stroke(); }
+  // plot each of the 8 emotions faintly, valence highlighted
+  EMOTIONS.forEach(e=>{
+    c.beginPath();
+    series.forEach((rd,i)=>{
+      const x=pad.l+iw*i/(series.length-1);
+      const y=pad.t+ih*(1-rd.values[e]/100);
+      i? c.lineTo(x,y):c.moveTo(x,y);
+    });
+    c.strokeStyle=traceCol;
+    c.lineWidth=1; c.stroke();
+  });
+  // valence line (the "mood" driver) in accent
+  c.beginPath();
+  series.forEach((rd,i)=>{
+    const x=pad.l+iw*i/(series.length-1);
+    const y=pad.t+ih*(1-(rd.valence+1)/2);
+    i? c.lineTo(x,y):c.moveTo(x,y);
+  });
+  c.strokeStyle=accCol; c.lineWidth=2.5; c.shadowColor=accCol; c.shadowBlur=8; c.stroke(); c.shadowBlur=0;
+  // label
+  c.fillStyle=faintCol; c.font="10px ui-monospace,monospace";
+  c.fillText("valence (mood) — 8 emotion traces behind", pad.l, h-4);
+}
+
+/* =========================================================================
+   5) CAMERA MODAL (expand large + side info)
+   ========================================================================= */
+function openCam(){
+  const m=$("#camModal");
+  m.querySelector(".big-cam").innerHTML="";
+  m.querySelector(".big-cam").appendChild(cameraPanel());   // reuse same feed, larger
+  // side column: who's on screen + alerts
+  const side=$("#camSide"); side.innerHTML="";
+  const who=el("div","panel"); who.style.flex="0 0 auto";
+  who.appendChild(el("h3",null,"On screen"));
+  const wb=el("div","body");
+  MOCK.liveNow.forEach(p=>{
+    const r=el("div","person"); r.style.marginBottom="6px";
+    r.innerHTML=`<div class="avatar">${initials(p.name)}</div>
+      <div class="meta"><div class="nm">${p.name}</div><div class="sub">${p.trackId}</div></div>
+      <span class="chip mood" style="background:${moodColor(p.mood)}">${p.mood}</span>`;
+    wb.appendChild(r);
+  });
+  who.appendChild(wb); side.appendChild(who);
+
+  const al=el("div","panel"); al.appendChild(el("h3",null,"Alerts"));
+  const ab=el("div","body");
+  MOCK.alerts.forEach(a=>{
+    const line=el("div",null,
+      `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line);font-size:12px">
+        <span class="chip" style="border-color:${a.level==='warn'?'var(--warn)':'var(--line)'};color:${a.level==='warn'?'var(--warn)':'var(--ink-dim)'}">${a.kind}</span>
+        <span>${a.who}</span>
+        <span style="margin-left:auto;font-family:var(--mono);color:var(--ink-faint)">${a.t}</span>
+      </div>${a.note?`<div style="font-size:11px;color:var(--ink-faint);font-family:var(--mono);padding-bottom:6px">${a.note}</div>`:""}`);
+    ab.appendChild(line);
+  });
+  al.appendChild(ab); side.appendChild(al);
+
+  m.classList.add("open");
+}
+function closeCam(){ $("#camModal").classList.remove("open"); }
+document.addEventListener("keydown", e=>{ if(e.key==="Escape") closeCam(); });
+
+/* =========================================================================
+   6) LAYOUT RENDERERS (A / B / C)
+   ========================================================================= */
+function renderA(stage){
+  const g=el("div","layout A");
+  const cam=el("div","panel a-cam"); cam.appendChild(el("h3",null,"Live · Cam 01 <span class='count'>expand ⤢</span>"));
+  const cb=el("div","body"); cb.style.padding="10px"; cb.style.display="flex"; cb.style.flexDirection="column";
+  const feedA=cameraPanel(); feedA.style.flex="1 1 auto"; feedA.style.minHeight="220px"; cb.appendChild(feedA); cam.appendChild(cb);
+  g.appendChild(cam);
+  const now=nowPanel(); now.classList.add("a-now"); g.appendChild(now);
+  const head=moodHead(); head.classList.add("a-head"); g.appendChild(head);
+  // right column: emotion + chart stacked in one panel-ish column
+  const right=el("div","panel a-chart"); right.appendChild(el("h3",null,"Expression"));
+  const rb=el("div","body"); rb.style.display="flex"; rb.style.flexDirection="column"; rb.style.gap="14px";
+  const emo=emotionPanel(); emo.style.border="0"; emo.style.background="transparent"; emo.style.flex="0 0 auto";
+  const chart=chartPanel(); chart.style.border="0"; chart.style.background="transparent"; chart.style.flex="0 0 auto";
+  // let embedded panel bodies grow to natural height (no inner clipping)
+  emo.querySelector(".body").style.overflow="visible"; chart.querySelector(".body").style.overflow="visible";
+  rb.appendChild(emo); rb.appendChild(chart); right.appendChild(rb); g.appendChild(right);
+  const sess=sessionsPanel(); sess.classList.add("a-sessions"); g.appendChild(sess);
+  stage.appendChild(g);
+}
+
+function renderB(stage){
+  const g=el("div","layout B");
+  const stats=statsPanel(); stats.classList.add("b-stats"); g.appendChild(stats);
+  const sess=sessionsPanel(); sess.classList.add("b-sessions"); g.appendChild(sess);
+  const focus=moodHead(); focus.classList.add("b-focus"); g.appendChild(focus);
+  const chart=chartPanel(); chart.classList.add("b-chart"); g.appendChild(chart);
+  // slim docked camera
+  const cam=el("div","panel b-cam"); cam.appendChild(el("h3",null,"Cam"));
+  const cb=el("div","body"); cb.style.padding="8px"; cb.style.display="flex"; cb.style.flexDirection="column"; cb.style.gap="8px";
+  const c=cameraPanel(true); c.style.minHeight="150px"; cb.appendChild(c);
+  const hint=el("div",null,"<div style='font-family:var(--mono);font-size:11px;color:var(--ink-faint);text-align:center'>click to open<br>full stage ⤢</div>");
+  cb.appendChild(hint);
+  // mini present-now under the cam
+  MOCK.liveNow.forEach(p=>{
+    const r=el("div","person"); r.dataset.name=p.name;
+    r.innerHTML=`<div class="avatar">${initials(p.name)}</div><div class="meta"><div class="nm" style="font-size:12px">${p.name.split(" ")[0]}</div></div>
+      <span class="chip mood" style="background:${moodColor(p.mood)}">${p.mood}</span>`;
+    r.onclick=()=>selectSubject(p.name); cb.appendChild(r);
+  });
+  cam.appendChild(cb); g.appendChild(cam);
+  stage.appendChild(g);
+}
+
+function renderC(stage){
+  const g=el("div","layout C");
+  const now=nowPanel(); now.classList.add("c-now"); g.appendChild(now);
+  // big focus: head + emotion bars side by side
+  const focus=el("div","panel c-focus"); focus.appendChild(el("h3",null,"Subject focus <span class='count' id='focusWho'></span>"));
+  const fb=el("div","body"); fb.style.display="grid"; fb.style.gridTemplateColumns="1.1fr 1fr"; fb.style.gap="16px";
+  const headWrap=moodHead(); headWrap.style.border="0"; headWrap.style.background="transparent"; headWrap.querySelector("h3").style.display="none";
+  const emo=emotionPanel(); emo.style.border="0"; emo.style.background="transparent";
+  emo.querySelector(".body").style.overflow="visible";
+  fb.appendChild(headWrap); fb.appendChild(emo); focus.appendChild(fb); g.appendChild(focus);
+  const cam=el("div","panel c-cam"); cam.appendChild(el("h3",null,"Cam · expand ⤢"));
+  const cbb=el("div","body"); cbb.style.padding="8px"; const cc=cameraPanel(true); cc.style.minHeight="150px"; cbb.appendChild(cc); cam.appendChild(cbb); g.appendChild(cam);
+  const pad=padPanel(); pad.classList.add("c-pad"); g.appendChild(pad);
+  const chart=chartPanel(); chart.classList.add("c-chart"); g.appendChild(chart);
+  stage.appendChild(g);
+}
+
+const RENDERERS = { A:renderA, B:renderB, C:renderC };
+let CURRENT="A";
+function switchDir(dir){
+  CURRENT=dir;
+  const stage=$("#stage"); stage.innerHTML="";
+  RENDERERS[dir](stage);
+  refreshSubjectViews();
+}
+
+/* =========================================================================
+   6.5) 3D HEAD ENGINE (hand-written WebGL — no library, stays offline)
+   Procedural head mesh: elongated + jaw taper + nose/brow bumps, smooth
+   normals, Lambert + chrome specular + neon rim glow. Drag to rotate.
+   All look controls read from TW (the tweaks state) live each frame.
+   ========================================================================= */
+
+// tweakable state for the head + look (edited by the Tweaks panel)
+const TW = { speed:0.28, glow:0.9, metal:0.2, segs:64, colorSource:"cyan", solid:false, wire:true };
+
+// fixed color choices (r,g,b 0..1) for the "surface color" tweak
+const HEAD_FIXED = { cyan:[0.30,0.85,1.0], blue:[.42,.62,1], green:[.35,.9,.55], amber:[1,.72,.30], teal:[.32,.92,.76], skin:[0.88,0.70,0.60] };
+
+// HSV->RGB for the time-cycling multicolour (h in 0..1)
+function hsv2rgb(h,s=0.9,v=1){ h=(h%1)*6; const i=Math.floor(h), f=h-i;
+  const p=v*(1-s), q=v*(1-s*f), t=v*(1-s*(1-f));
+  return [[v,t,p],[q,v,p],[p,v,t],[p,q,v],[t,p,v],[v,p,q]][i%6]; }
+const moodToRGB = m => (MOOD_META[m]||{}).glRGB || [1,.32,.72];
+
+// --- tiny column-major mat4 helpers ---
+function mMul(a,b){ const o=new Float32Array(16);
+  for(let c=0;c<4;c++)for(let r=0;r<4;r++){ let s=0; for(let k=0;k<4;k++) s+=a[k*4+r]*b[c*4+k]; o[c*4+r]=s; } return o; }
+function mPersp(fov,asp,n,f){ const t=1/Math.tan(fov/2);
+  return new Float32Array([t/asp,0,0,0, 0,t,0,0, 0,0,(f+n)/(n-f),-1, 0,0,2*f*n/(n-f),0]); }
+function mTrans(x,y,z){ return new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,x,y,z,1]); }
+function mRotY(a){ const c=Math.cos(a),s=Math.sin(a); return new Float32Array([c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1]); }
+function mRotX(a){ const c=Math.cos(a),s=Math.sin(a); return new Float32Array([1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]); }
+
+let HEADGL = null;
+function initHeadGL(canvas){
+  const gl = canvas.getContext("webgl", { antialias:true, alpha:true, premultipliedAlpha:false });
+  if(!gl){ canvas.parentElement.insertAdjacentHTML("beforeend",
+    "<div style='position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--mono);color:var(--ink-faint)'>WebGL unavailable</div>"); return; }
+
+  const vs = `attribute vec3 aPos; attribute vec3 aNorm;
+    uniform mat4 uProj,uView,uModel; varying vec3 vN,vW;
+    void main(){ vec4 w=uModel*vec4(aPos,1.0); vW=w.xyz; vN=mat3(uModel)*aNorm; gl_Position=uProj*uView*w; }`;
+  const fs = `precision mediump float; varying vec3 vN,vW;
+    uniform vec3 uColor,uRim,uCam; uniform float uGlow,uMetal,uWire;
+    void main(){
+      vec3 N=normalize(vN), V=normalize(uCam-vW);
+      if(uWire>0.5){ float r=pow(1.0-max(dot(N,V),0.0),1.5); gl_FragColor=vec4(uRim*(0.7+0.9*r),0.55); return; }
+      vec3 L1=normalize(vec3(0.55,0.65,0.95));   // warm key light
+      vec3 L2=normalize(vec3(-0.8,0.05,-0.35));  // cool blue fill
+      float d1=max(dot(N,L1),0.0), d2=max(dot(N,L2),0.0);
+      vec3 warm=vec3(1.0,0.95,0.88), cool=vec3(0.42,0.58,1.0);
+      vec3 diff = uColor*(0.12+0.9*d1)*warm + uColor*0.4*d2*cool;
+      vec3 H=normalize(L1+V); float spec=pow(max(dot(N,H),0.0), mix(28.0,120.0,uMetal));
+      float rim=pow(1.0-max(dot(N,V),0.0),2.8);
+      vec3 col = diff + vec3(spec)*mix(0.22,1.0,uMetal)*warm + uRim*rim*uGlow;
+      gl_FragColor=vec4(col,1.0);
+    }`;
+  const mk=(t,src)=>{ const s=gl.createShader(t); gl.shaderSource(s,src); gl.compileShader(s);
+    if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s)); return s; };
+  const prog=gl.createProgram();
+  gl.attachShader(prog,mk(gl.VERTEX_SHADER,vs)); gl.attachShader(prog,mk(gl.FRAGMENT_SHADER,fs));
+  gl.linkProgram(prog); gl.useProgram(prog);
+  const U={}; ["uProj","uView","uModel","uColor","uRim","uCam","uGlow","uMetal","uWire"].forEach(n=>U[n]=gl.getUniformLocation(prog,n));
+  const aPos=gl.getAttribLocation(prog,"aPos"), aNorm=gl.getAttribLocation(prog,"aNorm");
+  const posBuf=gl.createBuffer(), normBuf=gl.createBuffer(), triBuf=gl.createBuffer(), lineBuf=gl.createBuffer();
+  let triCount=0, lineCount=0;
+
+  // build the head mesh at a given resolution
+  function build(segs){
+    const rows=segs, cols=segs, sm=t=>{ t=Math.max(0,Math.min(1,t)); return t*t*(3-2*t); };
+    const grid=[];
+    for(let i=0;i<=rows;i++){ grid[i]=[];
+      // vertical profile: crown -> face -> jaw over the first 72% of rows, then a neck
+      const f=i/rows;
+      let Y,R;
+      if(f<0.72){ const a=f/0.72; Y=Math.cos(a*Math.PI); R=Math.pow(Math.sin(a*Math.PI),0.85); }
+      else      { const a=(f-0.72)/0.28; Y=-1-a*0.55; R=0.42+a*a*0.25; }   // neck + slight shoulder flare
+      for(let j=0;j<=cols;j++){ const lon=2*Math.PI*j/cols;
+        let x=Math.cos(lon)*R, z=Math.sin(lon)*R, y=Y;
+        x*=0.92; z*=1.04; y*=1.12;
+        if(z>0) z*=0.92; else z*=1.06;                 // flatter face, fuller occiput
+        const jaw=1-0.26*sm((-y-0.10)/0.55);           // narrow the jaw below the cheekbones
+        if(y<0.05) x*=jaw;
+        const fx=x, fy=y, mask=sm((z-0.08)/0.5);       // features fade in on the front
+        const G=(a,b,ka,kb)=>Math.exp(-(a*a*ka+b*b*kb));
+        let dz=0;
+        dz -= 0.30*G(fx-0.30, fy-0.14, 8, 14);   // left eye socket
+        dz -= 0.30*G(fx+0.30, fy-0.14, 8, 14);   // right eye socket
+        dz += 0.10*G(fx,      fy-0.30, 3, 12);   // brow ridge
+        dz += 0.30*G(fx,      fy-0.02, 12, 2.0); // nose bridge
+        dz += 0.28*G(fx,      fy+0.16, 16, 16);  // nose tip
+        dz += 0.10*G(fx-0.11, fy+0.15, 42, 42);  // nostril L
+        dz += 0.10*G(fx+0.11, fy+0.15, 42, 42);  // nostril R
+        dz -= 0.07*G(fx,      fy+0.26, 12, 34);  // philtrum
+        dz += 0.15*G(fx,      fy+0.33, 7, 22);   // lips
+        dz -= 0.08*G(fx,      fy+0.41, 10, 40);  // mouth line
+        dz += 0.12*G(fx,      fy+0.60, 4, 10);   // chin
+        dz += 0.08*G(fx-0.42, fy+0.05, 5, 6);    // left cheek
+        dz += 0.08*G(fx+0.42, fy+0.05, 5, 6);    // right cheek
+        z += dz*mask;
+        const sideMask=Math.pow(Math.abs(Math.cos(lon)),4);        // ears bulge on the sides
+        x += (x>=0?1:-1)*0.14*Math.exp(-((fy-0.02)*(fy-0.02))*9)*sideMask;
+        const S=0.6;
+        grid[i][j]=[x*S, (y+0.30)*S, z*S];
+      }
+    }
+    const g=(i,j)=>grid[Math.max(0,Math.min(rows,i))][(j+cols)%cols];
+    const P=[], Nn=[];
+    for(let i=0;i<=rows;i++)for(let j=0;j<=cols;j++){
+      const a=g(i,j+1),b=g(i,j-1),c=g(i+1,j),d=g(i-1,j);
+      const t1=[a[0]-b[0],a[1]-b[1],a[2]-b[2]], t2=[c[0]-d[0],c[1]-d[1],c[2]-d[2]];
+      let nx=t1[1]*t2[2]-t1[2]*t2[1], ny=t1[2]*t2[0]-t1[0]*t2[2], nz=t1[0]*t2[1]-t1[1]*t2[0];
+      const L=Math.hypot(nx,ny,nz)||1; nx/=L; ny/=L; nz/=L;
+      const p=grid[i][j]; if(nx*p[0]+ny*p[1]+nz*p[2]<0){ nx=-nx; ny=-ny; nz=-nz; }  // outward
+      P.push(p[0],p[1],p[2]); Nn.push(nx,ny,nz);
+    }
+    const idx=[], line=[], vi=(i,j)=>i*(cols+1)+j;
+    for(let i=0;i<rows;i++)for(let j=0;j<cols;j++){
+      const a=vi(i,j),b=vi(i,j+1),c=vi(i+1,j),d=vi(i+1,j+1);
+      idx.push(a,b,d, a,d,c); line.push(a,b, a,c);
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER,posBuf);  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(P),gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER,normBuf); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(Nn),gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,triBuf);  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(idx),gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,lineBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(line),gl.STATIC_DRAW);
+    triCount=idx.length; lineCount=line.length;
+  }
+
+  let curRGB = window.CUR_MOOD ? moodToRGB(window.CUR_MOOD) : [1,.32,.72];
+  const effColor = ()=> TW.colorSource==="mood" ? curRGB : (HEAD_FIXED[TW.colorSource]||curRGB);
+
+  // drag to rotate
+  let yaw=0.4, pitch=0.0, dragging=false, lx=0, ly=0, last=performance.now();
+  canvas.addEventListener("pointerdown",e=>{ dragging=true; lx=e.clientX; ly=e.clientY; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener("pointermove",e=>{ if(!dragging)return; yaw+=(e.clientX-lx)*0.01; pitch=Math.max(-1.2,Math.min(1.2,pitch+(e.clientY-ly)*0.01)); lx=e.clientX; ly=e.clientY; });
+  canvas.addEventListener("pointerup",()=>dragging=false);
+  canvas.addEventListener("pointercancel",()=>dragging=false);
+
+  gl.enable(gl.DEPTH_TEST);
+  build(TW.segs); let builtSegs=TW.segs;
+  const camDist=2.7;
+
+  function frame(now){
+    const dt=Math.min(0.05,(now-last)/1000); last=now;
+    if(builtSegs!==TW.segs){ build(TW.segs); builtSegs=TW.segs; }
+    if(!dragging) yaw += TW.speed*dt;
+    const dpr=Math.min(2,window.devicePixelRatio||1), w=canvas.clientWidth, h=canvas.clientHeight;
+    if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){ canvas.width=Math.round(w*dpr); canvas.height=Math.round(h*dpr); }
+    gl.viewport(0,0,canvas.width,canvas.height);
+    gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+    gl.useProgram(prog);
+    gl.uniformMatrix4fv(U.uProj,false,mPersp(0.9,(w||1)/(h||1),0.1,100));
+    gl.uniformMatrix4fv(U.uView,false,mTrans(0,0,-camDist));
+    gl.uniformMatrix4fv(U.uModel,false,mMul(mRotY(yaw),mRotX(pitch)));
+    gl.uniform3fv(U.uCam,[0,0,camDist]);
+    gl.uniform1f(U.uMetal,TW.metal);
+    // time-cycling colour: blue -> green -> yellow -> orange -> red -> pink -> ...
+    const cyc = hsv2rgb(now*0.00006);
+    const src = TW.colorSource;
+    const surf = src==="cycle"?cyc : src==="mood"?curRGB : (HEAD_FIXED[src]||cyc);
+    const rimC = src==="cycle"?cyc : src==="mood"?curRGB : surf;
+    gl.bindBuffer(gl.ARRAY_BUFFER,posBuf);  gl.enableVertexAttribArray(aPos);  gl.vertexAttribPointer(aPos,3,gl.FLOAT,false,0,0);
+    gl.bindBuffer(gl.ARRAY_BUFFER,normBuf); gl.enableVertexAttribArray(aNorm); gl.vertexAttribPointer(aNorm,3,gl.FLOAT,false,0,0);
+    // solid pass: lit surface if enabled, else a dark occluder so the wireframe reads FRONT-ONLY (AR-mask look)
+    gl.uniform1f(U.uWire,0.0); gl.disable(gl.BLEND); gl.enable(gl.DEPTH_TEST);
+    gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(1.0,1.0);
+    gl.uniform3fv(U.uColor, TW.solid?surf:[cyc[0]*0.10,cyc[1]*0.10,cyc[2]*0.10]);
+    gl.uniform3fv(U.uRim, rimC);
+    gl.uniform1f(U.uGlow, TW.solid?TW.glow:0.0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,triBuf); gl.drawElements(gl.TRIANGLES,triCount,gl.UNSIGNED_SHORT,0);
+    gl.disable(gl.POLYGON_OFFSET_FILL);
+    // wireframe pass: bright cycling lines, depth-tested so only the front mesh shows
+    if(TW.wire){ gl.uniform1f(U.uWire,1.0); gl.uniform3fv(U.uRim,rimC);
+      gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA,gl.ONE);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,lineBuf); gl.drawElements(gl.LINES,lineCount,gl.UNSIGNED_SHORT,0); }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+  HEADGL = { setMood(m){ curRGB = moodToRGB(m); } };
+  window.HEADGL = HEADGL;
+}
+
+/* =========================================================================
+   6.6) TWEAKS PANEL (floating controls for the head + look)
+   ========================================================================= */
+function buildTweaks(){
+  const p=el("div"); p.id="tweaks";
+  p.innerHTML=`
+    <div class="tw-head" id="twHead"><span class="gear">\u2699</span> Tweaks \u00b7 3D head <span class="chev" id="twChev">\u25be</span></div>
+    <div class="tw-body">
+      <div class="tw-row"><div class="lab"><span>Rotation speed</span><span id="vSpeed"></span></div>
+        <input type="range" id="tSpeed" min="0" max="2" step="0.05"></div>
+      <div class="tw-row"><div class="lab"><span>Neon glow</span><span id="vGlow"></span></div>
+        <input type="range" id="tGlow" min="0" max="2" step="0.05"></div>
+      <div class="tw-row"><div class="lab"><span>Metallic / chrome</span><span id="vMetal"></span></div>
+        <input type="range" id="tMetal" min="0" max="1" step="0.05"></div>
+      <div class="tw-row"><div class="lab"><span>Mesh detail</span><span id="vSegs"></span></div>
+        <input type="range" id="tSegs" min="12" max="64" step="4"></div>
+      <div class="tw-row"><div class="lab"><span>Surface color</span><span></span></div>
+        <div class="tw-seg"><button data-c="cyan">Cyan</button><button data-c="blue">Blue</button><button data-c="green">Green</button></div>
+        <div class="tw-seg" style="margin-top:4px"><button data-c="amber">Amber</button><button data-c="mood">Mood</button><button data-c="cycle">Cycle</button></div></div>
+      <div class="tw-toggle"><span>Solid surface</span><div class="sw" id="tSolid"></div></div>
+      <div class="tw-toggle"><span>Wireframe overlay</span><div class="sw" id="tWire"></div></div>
+      <div style="border-top:1px solid var(--line);padding-top:11px;font-family:var(--mono);font-size:11px;color:var(--ink-faint)">drag the head to rotate it</div>
+    </div>`;
+  document.body.appendChild(p);
+  $("#twHead").onclick=()=>{ p.classList.toggle("collapsed"); $("#twChev").textContent=p.classList.contains("collapsed")?"\u25b8":"\u25be"; };
+  const bindRange=(id,key,vid,fmt)=>{ const inp=$(id); inp.value=TW[key];
+    const upd=()=>{ TW[key]=parseFloat(inp.value); if(vid)$(vid).textContent=fmt?fmt(TW[key]):TW[key]; }; inp.oninput=upd; upd(); };
+  bindRange("#tSpeed","speed","#vSpeed",v=>v.toFixed(2)+"\u00d7");
+  bindRange("#tGlow","glow","#vGlow",v=>v.toFixed(2));
+  bindRange("#tMetal","metal","#vMetal",v=>v.toFixed(2));
+  bindRange("#tSegs","segs","#vSegs",v=>v);
+  const paint=()=>p.querySelectorAll(".tw-seg button").forEach(b=>b.classList.toggle("on",b.dataset.c===TW.colorSource));
+  p.querySelectorAll(".tw-seg button").forEach(b=>b.onclick=()=>{ TW.colorSource=b.dataset.c; paint(); }); paint();
+  const bindSw=(id,key)=>{ const sw=$(id); const set=()=>sw.classList.toggle("on",TW[key]); sw.onclick=()=>{ TW[key]=!TW[key]; set(); }; set(); };
+  bindSw("#tSolid","solid"); bindSw("#tWire","wire");
+  // start collapsed so it never covers the content columns
+  p.classList.add("collapsed"); $("#twChev").textContent="\u25b8";
+}
+
+/* =========================================================================
+   6.7) LIGHT-PILLAR BACKGROUND (ported from React Bits <LightPillar/> to raw
+   WebGL — no three.js, stays offline). Raymarched light column on a fullscreen
+   quad; top/bottom colours ride the same time-cycling multicolour theme.
+   ========================================================================= */
+function initBG(){
+  const cv=document.getElementById("bgfx");
+  const gl=cv.getContext("webgl",{alpha:true,antialias:false,depth:false,stencil:false,powerPreference:"low-power"});
+  if(!gl) return;
+  const vs=`attribute vec2 p; varying vec2 vUv; void main(){ vUv=(p+1.0)*0.5; gl_Position=vec4(p,0.0,1.0); }`;
+  const fs=`precision highp float;
+    uniform float uTime; uniform vec2 uResolution; uniform vec3 uTopColor,uBottomColor;
+    uniform float uIntensity,uGlowAmount,uPillarWidth,uPillarHeight,uNoiseIntensity;
+    uniform float uRotCos,uRotSin,uPillarRotCos,uPillarRotSin,uWaveSin,uWaveCos;
+    varying vec2 vUv;
+    const float STEP_MULT=1.2; const int MAX_ITER=48; const int WAVE_ITER=3;
+    vec3 ctanh(vec3 x){ x=min(x,10.0); vec3 e=exp(2.0*x); return (e-1.0)/(e+1.0); }
+    void main(){
+      vec2 uv=(vUv*2.0-1.0)*vec2(uResolution.x/uResolution.y,1.0);
+      uv=vec2(uPillarRotCos*uv.x-uPillarRotSin*uv.y, uPillarRotSin*uv.x+uPillarRotCos*uv.y);
+      vec3 ro=vec3(0.0,0.0,-10.0); vec3 rd=normalize(vec3(uv,1.0));
+      float rotC=uRotCos, rotS=uRotSin;
+      vec3 col=vec3(0.0); float t=0.1;
+      for(int i=0;i<MAX_ITER;i++){
+        vec3 p=ro+rd*t;
+        p.xz=vec2(rotC*p.x-rotS*p.z, rotS*p.x+rotC*p.z);
+        vec3 q=p; q.y=p.y*uPillarHeight+uTime;
+        float freq=1.0, amp=1.0;
+        for(int j=0;j<WAVE_ITER;j++){
+          q.xz=vec2(uWaveCos*q.x-uWaveSin*q.z, uWaveSin*q.x+uWaveCos*q.z);
+          q+=cos(q.zxy*freq - uTime*float(j)*2.0)*amp; freq*=2.0; amp*=0.5;
+        }
+        float d=length(cos(q.xz))-0.2;
+        float bound=length(p.xz)-uPillarWidth;
+        float k=4.0; float h=max(k-abs(d-bound),0.0);
+        d=max(d,bound)+h*h*0.0625/k; d=abs(d)*0.15+0.01;
+        float grad=clamp((15.0-p.y)/30.0,0.0,1.0);
+        col+=mix(uBottomColor,uTopColor,grad)/d;
+        t+=d*STEP_MULT; if(t>50.0) break;
+      }
+      col=ctanh(col*uGlowAmount/(uPillarWidth/3.0));
+      col-=fract(sin(dot(gl_FragCoord.xy, vec2(12.9898,78.233)))*43758.5453)/15.0*uNoiseIntensity;
+      gl_FragColor=vec4(col*uIntensity,1.0);
+    }`;
+  const mk=(t,src)=>{ const s=gl.createShader(t); gl.shaderSource(s,src); gl.compileShader(s);
+    if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s)); return s; };
+  const prog=gl.createProgram(); gl.attachShader(prog,mk(gl.VERTEX_SHADER,vs)); gl.attachShader(prog,mk(gl.FRAGMENT_SHADER,fs));
+  gl.linkProgram(prog); gl.useProgram(prog);
+  const buf=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1, 3,-1, -1,3]),gl.STATIC_DRAW);
+  const ap=gl.getAttribLocation(prog,"p"); gl.enableVertexAttribArray(ap); gl.vertexAttribPointer(ap,2,gl.FLOAT,false,0,0);
+  const U=n=>gl.getUniformLocation(prog,n);
+  const u={ time:U("uTime"), res:U("uResolution"), top:U("uTopColor"), bot:U("uBottomColor"),
+    inten:U("uIntensity"), glow:U("uGlowAmount"), pw:U("uPillarWidth"), ph:U("uPillarHeight"),
+    noise:U("uNoiseIntensity"), rc:U("uRotCos"), rs:U("uRotSin"), prc:U("uPillarRotCos"),
+    prs:U("uPillarRotSin"), ws:U("uWaveSin"), wc:U("uWaveCos") };
+  // static pillar params (see React Bits prop table)
+  gl.uniform1f(u.inten,0.85); gl.uniform1f(u.glow,0.006); gl.uniform1f(u.pw,3.0);
+  gl.uniform1f(u.ph,0.4); gl.uniform1f(u.noise,0.35);
+  gl.uniform1f(u.prc,1.0); gl.uniform1f(u.prs,0.0);
+  gl.uniform1f(u.ws,Math.sin(0.4)); gl.uniform1f(u.wc,Math.cos(0.4));
+  const dpr=Math.min(1.5,window.devicePixelRatio||1);
+  function size(){ cv.width=Math.round(innerWidth*dpr); cv.height=Math.round(innerHeight*dpr);
+    gl.viewport(0,0,cv.width,cv.height); gl.uniform2f(u.res,cv.width,cv.height); }
+  size(); window.addEventListener("resize",size,{passive:true});
+  let tt=0;
+  (function loop(now){
+    tt += 0.016*0.3;                                  // rotationSpeed 0.3
+    gl.uniform1f(u.time,tt);
+    gl.uniform1f(u.rc,Math.cos(tt*0.3)); gl.uniform1f(u.rs,Math.sin(tt*0.3));
+    const h=(now*0.00003)%1;                           // ride the multicolour cycle
+    const a=hsv2rgb(h), b=hsv2rgb(h+0.12);
+    gl.uniform3fv(u.top,a); gl.uniform3fv(u.bot,b);
+    gl.drawArrays(gl.TRIANGLES,0,3);
+    requestAnimationFrame(loop);
+  })(performance.now());
+}
+
+/* =========================================================================
+   7) BOOT
+   ========================================================================= */
+/* theme toggle (dark <-> light) */
+function setTheme(t){
+  document.documentElement.setAttribute("data-theme", t);
+  const b=$("#themeBtn"); if(b) b.textContent = t==="light" ? "◑ light" : "◐ dark";
+  if($("#lineChart")) drawLineChart();
+}
+$("#themeBtn").onclick = ()=>{
+  const cur = document.documentElement.getAttribute("data-theme")==="light" ? "light" : "dark";
+  setTheme(cur==="light" ? "dark" : "light");
+};
+window.addEventListener("resize", ()=>{ if($("#lineChart")) drawLineChart(); });
+
+// running clock
+setInterval(()=>{ $("#clock").textContent=new Date().toLocaleTimeString([], {hour12:false}); }, 1000);
+
+buildTweaks();
+initBG();
+setTheme("dark");
+switchDir("C");
+
+// GLOBAL "time colour" cycle — sweeps the UI accents through the full spectrum
+// (blue -> green -> yellow -> orange -> red -> pink -> ...) over a black background.
+let __hue = 250;
+setInterval(()=>{
+  __hue = (__hue + 0.35) % 360;
+  const r = document.documentElement.style;
+  r.setProperty("--acc-mag",  `oklch(0.72 0.19 ${__hue})`);
+  r.setProperty("--edge",      `oklch(0.66 0.18 ${__hue} / 0.6)`);
+  r.setProperty("--dot",       `oklch(0.62 0.16 ${__hue} / 0.22)`);
+  r.setProperty("--page-glow", `radial-gradient(1000px 560px at 60% 120%, oklch(0.50 0.20 ${__hue} / .40), transparent 70%)`);
+}, 60);
+</script>
+</body>
+</html>

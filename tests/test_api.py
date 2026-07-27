@@ -137,9 +137,46 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(r["events"][0]["mood"], "pleased")
 
     def test_dashboard_served(self):
+        # Serves the built React bundle. 503 (with a build hint) is the
+        # correct answer when the bundle hasn't been built yet, so accept
+        # either rather than requiring node in the test environment.
         r = self.client.get("/")
-        self.assertEqual(r.status_code, 200)
-        self.assertIn("WATCHER", r.text)
+        self.assertIn(r.status_code, (200, 503))
+        if r.status_code == 200:
+            self.assertIn("Watcher", r.text)
+            self.assertIn('id="root"', r.text)
+        else:
+            self.assertIn("npm run build", r.json()["detail"])
+
+    def test_live_events_bus_round_trip(self):
+        # The pipeline publishes on one connection; the API reads on another.
+        # This is the bridge that lets the WebSocket see pipeline events.
+        store = StorageLayer(db_path=self.db, clear_unregistered=False)
+        try:
+            start = store.latest_live_id()
+            store.publish_live_event({
+                "event_type": "presence_alert", "presence": "appeared",
+                "timestamp": 1234.5, "camera_id": "cam", "track_id": 7,
+                "identity_label": "alice",
+            })
+            fresh = StorageLayer(db_path=self.db, clear_unregistered=False)
+            try:
+                rows = fresh.read_live_events(after_id=start)
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0][1]["event_type"], "presence_alert")
+                self.assertEqual(rows[0][1]["track_id"], 7)
+            finally:
+                fresh.close()
+        finally:
+            store.close()
+
+    def test_register_rejects_undecodable_upload(self):
+        r = self.client.post(
+            "/api/identities/register",
+            data={"name": "Bob"},
+            files={"image": ("x.jpg", b"not an image", "image/jpeg")},
+        )
+        self.assertEqual(r.status_code, 400)
 
     # ── safety properties ─────────────────────────────────────────────────
 
