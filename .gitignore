@@ -280,3 +280,13 @@ faces/
 
 # Runtime logs — contain identity labels and timestamps (behavioural data)
 logs/
+
+# ─── Layer 9 dashboard (React + Vite) ────────────────────────────────────────
+# node_modules is rebuilt by `npm install` and must never be committed.
+src/layer9_dashboard/node_modules/
+src/layer9_dashboard/.vite/
+# The built bundle IS committed on purpose — it lets `python run_api.py`
+# serve the dashboard on a machine without Node. The generic `dist/` rule
+# further up (Python packaging) would otherwise swallow it.
+!src/layer9_dashboard/dist/
+!src/layer9_dashboard/dist/**

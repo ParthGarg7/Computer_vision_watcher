@@ -8,10 +8,9 @@ dashboard (Layer 9). This is the READ side of the system: everything the
 pipeline has persisted becomes queryable JSON, plus interactive docs at
 /docs (FastAPI generates OpenAPI automatically).
 
-── Scope of this scaffold ───────────────────────────────────────────────────
+── Endpoints ────────────────────────────────────────────────────────────────
 
-IN (working now):
-    GET  /                                        dashboard (Layer 9)
+    GET  /                                        dashboard (Layer 9 bundle)
     GET  /api/health                              liveness + storage status
     GET  /api/stats                               per-person totals
     GET  /api/sessions?limit=N                    recent sessions + appearances
@@ -21,15 +20,14 @@ IN (working now):
     GET  /api/identities                          registered people (FAISS meta)
     GET  /api/identities/{label}/history          one person across sessions
     GET  /api/events/recent?limit=N               latest expression readings
+    POST /api/identities/register                 enrol a face from an upload
+    WS   /ws/live                                 real-time Layer 6 events
 
-OUT (integration phase, once the frontend design lands):
-    WS   /live            — pushes the live_expression_update / presence_alert
-                            / threshold_alert events Layer 6 already emits.
-                            Needs an event bus between the pipeline process
-                            and this server (Arch Doc §2: Redis pub/sub at
-                            MVP), so it arrives with the integration work.
-    POST /identities/register — runs InsightFace on an uploaded image; needs
-                            upload handling + the embedder in this process.
+The WebSocket forwards the events Layer 6 already emits
+(live_expression_update / presence_alert / threshold_alert). Because the
+pipeline and this server are separate processes, those events travel through
+the `live_events` table in the shared WAL database rather than an in-process
+queue — see StorageLayer.publish_live_event for why, and what it trades off.
 
 ── Design decisions ─────────────────────────────────────────────────────────
 
@@ -48,12 +46,15 @@ Paths are configurable via app.state (tests point them at temp files):
 Ref: Layer 8 Architecture Doc — Sections 1, 2, 3, 4.1
 """
 
+import asyncio
 import json
 import os
 import sqlite3
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, WebSocket
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.websockets import WebSocketDisconnect
 
 from src.core.logger import get_logger
 from src.layer4_identity.identity_store import DEFAULT_STORE_PATH
@@ -61,9 +62,13 @@ from src.layer7_storage.store import DEFAULT_DB_PATH
 
 log = get_logger("watcher.layer8")
 
-_DASHBOARD = os.path.join(
+_L9 = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "layer9_dashboard", "index.html")
+    "layer9_dashboard")
+# The built React bundle. Falls back to a message if the dashboard hasn't
+# been built yet (npm run build inside src/layer9_dashboard).
+_DIST = os.path.join(_L9, "dist")
+_DASHBOARD = os.path.join(_DIST, "index.html")
 
 app = FastAPI(
     title="The Watcher — API",
@@ -112,9 +117,12 @@ def _load_json_fields(row: dict, *fields) -> dict:
 
 @app.get("/", include_in_schema=False)
 def dashboard():
-    """Serve the Layer 9 dashboard."""
+    """Serve the built Layer 9 dashboard."""
     if not os.path.exists(_DASHBOARD):
-        raise HTTPException(status_code=404, detail="dashboard not found")
+        raise HTTPException(
+            status_code=503,
+            detail="Dashboard not built. Run: cd src/layer9_dashboard && "
+                   "npm install && npm run build")
     return FileResponse(_DASHBOARD, media_type="text/html")
 
 
@@ -274,8 +282,8 @@ def identity_history(label: str):
 @app.get("/api/events/recent")
 def recent_events(limit: int = 50):
     """
-    Latest expression readings, newest first. The dashboard polls this
-    until the /live WebSocket lands with the integration work.
+    Latest expression readings, newest first. Also the dashboard's fallback
+    when the live WebSocket cannot connect (pipeline not running).
     """
     conn = _connect_ro()
     try:
@@ -286,3 +294,137 @@ def recent_events(limit: int = 50):
         return {"events": rows}
     finally:
         conn.close()
+
+
+# ─── Live channel ─────────────────────────────────────────────────────────────
+
+# How often the server checks the live bus for new events. The pipeline
+# writes them from another process, so this is a poll rather than a push;
+# 250ms is well under the eye's tolerance for a status dashboard.
+LIVE_POLL_SEC = 0.25
+
+
+@app.websocket("/ws/live")
+async def live_channel(ws: WebSocket):
+    """
+    Stream Layer 6's real-time events to a dashboard.
+
+    Starts from "now" (the newest event id at connect time) rather than
+    replaying the buffer, so a client that connects mid-run sees current
+    activity instead of a burst of history.
+    """
+    await ws.accept()
+    log.debug("[Layer8] live client connected")
+
+    last_id = 0
+    try:
+        conn = _connect_ro()
+        try:
+            row = conn.execute("SELECT MAX(id) FROM live_events").fetchone()
+            last_id = row[0] or 0
+        finally:
+            conn.close()
+    except HTTPException:
+        # No database yet — sit with the client and pick up when it appears.
+        pass
+    except sqlite3.Error:
+        pass
+
+    try:
+        while True:
+            try:
+                conn = _connect_ro()
+                try:
+                    rows = conn.execute(
+                        "SELECT id, payload FROM live_events WHERE id > ? "
+                        "ORDER BY id LIMIT 200", (last_id,)).fetchall()
+                finally:
+                    conn.close()
+                for row_id, payload in rows:
+                    last_id = row_id
+                    await ws.send_text(payload)
+            except HTTPException:
+                pass          # database not created yet; keep waiting
+            except sqlite3.Error as e:
+                log.debug(f"[Layer8] live poll skipped: {e}")
+            await asyncio.sleep(LIVE_POLL_SEC)
+    except WebSocketDisconnect:
+        log.debug("[Layer8] live client disconnected")
+    except Exception:
+        log.exception("[Layer8] live channel failed")
+        try:
+            await ws.close()
+        except Exception:
+            pass
+
+
+# ─── Registration ─────────────────────────────────────────────────────────────
+
+@app.post("/api/identities/register")
+async def register_identity(
+    name: str = Form(...),
+    image: UploadFile = File(...),
+    person_id: str | None = Form(None),
+):
+    """
+    Enrol a face into the Layer 4 registry from an uploaded photo.
+
+    Runs the same InsightFace embedder the pipeline uses, at full-image
+    detection size (the upload is a whole photo, not a crop). Pass an
+    existing person_id to add another sample to that person instead of
+    creating a new one — more samples means better recognition at angles.
+
+    The heavy imports happen HERE, not at module import: the API server
+    should start in a second and serve history without loading ~340 MB of
+    face models that most requests never need.
+    """
+    import cv2
+    import numpy as np
+
+    data = await image.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="empty upload")
+
+    frame = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    if frame is None:
+        raise HTTPException(status_code=400,
+                            detail="could not decode image (jpg/png expected)")
+
+    try:
+        from src.layer4_identity.embedder import FaceEmbedder, FULL_IMAGE_DET_SIZE
+        from src.layer4_identity.identity_store import IdentityStore
+    except Exception as e:
+        raise HTTPException(status_code=503,
+                            detail=f"face models unavailable: {e}")
+
+    global _EMBEDDER
+    if _EMBEDDER is None:
+        log.info("  [Layer8] loading InsightFace for registration…")
+        _EMBEDDER = FaceEmbedder(det_size=FULL_IMAGE_DET_SIZE)
+
+    embedding, _ = _EMBEDDER.get_embedding(frame)
+    if embedding is None:
+        raise HTTPException(
+            status_code=422,
+            detail="no face found in that image — try a clearer, "
+                   "front-facing photo with good lighting")
+
+    # Registration WRITES, so it needs its own read-write store rather than
+    # the read-only connections the query endpoints use. clear_unregistered
+    # is not involved: this is the FAISS registry, not the session database.
+    store = IdentityStore(store_path=app.state.faces_meta.replace(".meta.json", ""))
+    pid = store.register(embedding=embedding, person_id=person_id,
+                         name=name if not person_id else None)
+    store.save()
+    log.info(f"  [Layer8] registered '{name}' -> {pid}")
+    return {"person_id": pid, "name": name,
+            "samples": store.get_person(pid)["embedding_count"]}
+
+
+_EMBEDDER = None
+
+
+# ─── Static assets (mounted last so /api and /ws win) ────────────────────────
+
+if os.path.isdir(_DIST):
+    app.mount("/", StaticFiles(directory=_DIST, html=True), name="dashboard")

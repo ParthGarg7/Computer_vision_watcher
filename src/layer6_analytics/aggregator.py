@@ -338,6 +338,18 @@ class SessionAggregator:
                 },
             })
 
+        # Publish this frame's real-time events onto the live bus so the
+        # Layer 8 WebSocket can forward them to dashboards. The caller still
+        # gets them back for console printing — this is an extra consumer,
+        # not a replacement.
+        if self._storage is not None and events:
+            for ev in events:
+                try:
+                    self._storage.publish_live_event(ev)
+                except Exception:
+                    # A dashboard feed must never take down the pipeline.
+                    log.debug("live event publish failed", exc_info=True)
+
         return events
 
     def close(self):
