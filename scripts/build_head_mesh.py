@@ -98,26 +98,30 @@ pole_i = n_face_verts + len(new_verts)
 new_verts.append(pole.tolist())
 
 # ── neck: a short column under the jaw ──────────────────────────────────────
-# Extruded from the lowest arc of the rim, held at near-constant width (a
-# taper to a point reads as a spike, not a neck) and stopped short so the
-# head stays the subject.
-ys = loop_pts[:, 1]
-jaw_mask = ys < (ys.min() + (ys.max() - ys.min()) * 0.30)
-jaw_ids = loop[jaw_mask]
-NECK = 5
-neck_rings = [jaw_ids]
-if len(jaw_ids) >= 3:
-    jaw_pts = V[jaw_ids]
-    jaw_c = jaw_pts.mean(axis=0)
-    for i in range(1, NECK + 1):
-        t = i / NECK
-        ring = (jaw_pts - jaw_c) * (1.0 - 0.12 * t) + jaw_c
-        ring[:, 1] = jaw_pts[:, 1] - (depth * 0.52) * t
-        # drift slightly back: a neck sits under the skull, not under the chin
-        ring[:, 2] = jaw_pts[:, 2] - depth * 0.28 * t
-        base = n_face_verts + len(new_verts)
-        new_verts.extend(ring.tolist())
-        neck_rings.append(np.arange(base, base + len(jaw_ids), dtype=np.int32))
+# Disabled: the design calls for a complete face with NO neck. The cranium
+# bridging above already closes the entire boundary loop, so dropping the
+# neck leaves a clean, watertight head that ends at the jaw — no open hole.
+# Flip BUILD_NECK back to True to restore the short neck column.
+BUILD_NECK = False
+neck_rings = []
+if BUILD_NECK:
+    ys = loop_pts[:, 1]
+    jaw_mask = ys < (ys.min() + (ys.max() - ys.min()) * 0.30)
+    jaw_ids = loop[jaw_mask]
+    NECK = 5
+    neck_rings = [jaw_ids]
+    if len(jaw_ids) >= 3:
+        jaw_pts = V[jaw_ids]
+        jaw_c = jaw_pts.mean(axis=0)
+        for i in range(1, NECK + 1):
+            t = i / NECK
+            ring = (jaw_pts - jaw_c) * (1.0 - 0.12 * t) + jaw_c
+            ring[:, 1] = jaw_pts[:, 1] - (depth * 0.52) * t
+            # drift slightly back: a neck sits under the skull, not the chin
+            ring[:, 2] = jaw_pts[:, 2] - depth * 0.28 * t
+            base = n_face_verts + len(new_verts)
+            new_verts.extend(ring.tolist())
+            neck_rings.append(np.arange(base, base + len(jaw_ids), dtype=np.int32))
 
 ALL = np.vstack([V, np.array(new_verts, dtype=np.float64)])
 
