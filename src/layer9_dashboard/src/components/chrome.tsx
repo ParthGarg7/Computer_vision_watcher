@@ -9,10 +9,8 @@ import type { HeadLook } from "./MoodHead";
 /* ── Top bar ─────────────────────────────────────────────────────────────── */
 
 export function TopBar({
-  layout, onLayout, theme, onTheme, live,
+  theme, onTheme, live,
 }: {
-  layout: "A" | "B" | "C";
-  onLayout: (l: "A" | "B" | "C") => void;
   theme: "dark" | "light";
   onTheme: () => void;
   live: boolean;
@@ -29,7 +27,7 @@ export function TopBar({
         <span className="dot" /> THE WATCHER <small>local · offline</small>
       </div>
 
-      <div className={`livechip${live ? " on" : ""}`} title={
+      <div className={`livechip${live ? " on" : ""}`} style={{ marginLeft: "auto" }} title={
         live ? "receiving live events from the pipeline"
              : "no live connection — showing stored data"
       }>
@@ -37,12 +35,8 @@ export function TopBar({
         {live ? "live" : "offline"}
       </div>
 
-      <div className="switcher" style={{ marginLeft: "auto" }}>
-        {(["A", "B", "C"] as const).map((l) => (
-          <button key={l} className={layout === l ? "on" : ""} onClick={() => onLayout(l)}>
-            {l === "A" ? "A · camera" : l === "B" ? "B · analytics" : "C · focus"}
-          </button>
-        ))}
+      {/* Single focus view — no layout switcher. Only the theme toggle remains. */}
+      <div className="switcher">
         <button onClick={onTheme} title="Toggle theme">
           {theme === "dark" ? "◐ dark" : "◑ light"}
         </button>

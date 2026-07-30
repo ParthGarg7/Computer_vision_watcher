@@ -73,7 +73,9 @@ export default function MoodHead({ mood, look }: Props) {
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
-    camera.position.set(0, 0, 3.25);
+    // Closer than the old neck-having head: with the neck gone the mesh is
+    // pure face+cranium, so it can sit larger in the panel.
+    camera.position.set(0, 0, 2.7);
 
     // ── geometry (shared by both passes) ─────────────────────────────────
     const geom = new THREE.BufferGeometry();
@@ -86,9 +88,8 @@ export default function MoodHead({ mood, look }: Props) {
     wireGeom.setIndex(new THREE.BufferAttribute(HEAD_EDGES, 1));
 
     const group = new THREE.Group();
-    // The canonical model faces +Z but sits slightly low; nudge it up so the
-    // face is centred in the panel rather than the neck.
-    group.position.y = 0.06;
+    // Mesh is already centred on the origin (the build script normalises it),
+    // and with no neck no vertical nudge is needed.
     scene.add(group);
 
     // Pass 1 — solid. Either a lit surface or a pure depth occluder.

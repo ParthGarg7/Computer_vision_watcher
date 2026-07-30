@@ -82,7 +82,11 @@ body{
   overflow:hidden;
   transition: background .4s, color .3s;
 }
-/* layered background: light-pillar shader, then dot grid, then the app */
+/* layered background: LightPillar shader, then dot grid, then the app.
+   #pillar-bg hosts the React Bits <LightPillar/> (its own canvas is absolute
+   inside). Fixed + full-screen + behind everything. */
+#pillar-bg{ position:fixed; inset:0; z-index:0; pointer-events:none;
+  opacity:.85; }
 #bgfx{ position:fixed; inset:0; z-index:0; width:100%; height:100%; display:block; }
 #bggrid{ position:fixed; inset:0; z-index:1; pointer-events:none;
   background: radial-gradient(var(--dot) 1px, transparent 1.6px) 0 0 / 22px 22px; }
@@ -311,32 +315,21 @@ canvas{ display:block; width:100%; }
 /* ---------- Layout grids per direction ---------- */
 .layout{ height:100%; display:grid; gap:14px; }
 
-/* A: camera-first — cam | now + sessions | head + expression
-   Every child is placed EXPLICITLY. Leaving one to auto-placement (as the
-   original demo did with .a-head) pushes it into an implicit third row, so
-   the two template rows stop filling the stage and everything shrinks. */
-.layout.A{ grid-template-columns: 340px 1.15fr 1fr; grid-template-rows:1fr 1fr; }
-.A .a-cam{      grid-column:1; grid-row:1 / span 2; }
-.A .a-now{      grid-column:2; grid-row:1; }
-.A .a-sessions{ grid-column:2; grid-row:2; }
-.A .a-head{     grid-column:3; grid-row:1; }
-.A .a-chart{    grid-column:3; grid-row:2; }
 
-/* B: slim docked cam on right + drawer; dashboard grid on left */
-.layout.B{ grid-template-columns: 1.4fr 1fr 190px; grid-template-rows:auto 1fr 1fr; }
-.B .b-stats{ grid-column:1 / span 2; }
-.B .b-sessions{ grid-column:1; grid-row:2 / span 2; }
-.B .b-focus{ grid-column:2; grid-row:2; }
-.B .b-chart{ grid-column:2; grid-row:3; }
-.B .b-cam{ grid-column:3; grid-row:1 / span 3; }
-
-/* C: focus cockpit — big head center, widgets on edges */
-.layout.C{ grid-template-columns: 260px 1fr 260px; grid-template-rows:auto 1fr auto; }
-.C .c-now{ grid-column:1; grid-row:1 / span 2; }
+/* Only C is used now — the single focus cockpit. Layouts A and B were
+   removed with the view switcher. Big head centre stage, Present Now on the
+   left, camera + valence/arousal on the right, mood-over-time across the
+   bottom. Matches the reference design. */
+.layout.C{ grid-template-columns: 300px 1fr 320px; grid-template-rows:1fr 1fr 220px; }
+.C .c-now{   grid-column:1; grid-row:1 / span 2; }
 .C .c-focus{ grid-column:2; grid-row:1 / span 2; }
-.C .c-cam{ grid-column:3; grid-row:1; }
-.C .c-pad{ grid-column:3; grid-row:2; }
+.C .c-cam{   grid-column:3; grid-row:1; }
+.C .c-pad{   grid-column:3; grid-row:2; }
 .C .c-chart{ grid-column:1 / span 3; grid-row:3; }
+
+/* Subject-focus panel: head on the left, expression bars on the right. */
+.focus-grid{ display:grid; grid-template-columns:1.15fr 1fr; gap:18px;
+  height:100%; min-height:0; }
 
 /* ---------- WebGL 3D head ---------- */
 .head-stage{ position:relative; }
