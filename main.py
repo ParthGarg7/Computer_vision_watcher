@@ -46,6 +46,7 @@ import numpy as np
 import torch
 
 from src.core import drawing
+from src.core.live_frame import LiveFrameWriter
 from src.core.logger import setup_logging, get_logger
 
 log = get_logger("watcher.main")
@@ -325,6 +326,11 @@ def run_pipeline(
     _is_fullscreen = False
     _stop = False  # shared stop flag for X button / Q key
 
+    # Live-frame relay for the dashboard's camera panel (Layer 8/9). Shares the
+    # annotated frame with the API process as a throttled, downscaled JPEG so
+    # the browser can mirror this window without opening the webcam twice.
+    live_writer = LiveFrameWriter()
+
     fps_start = time.time()
     fps_count = 0
     display_fps = 0.0
@@ -445,6 +451,9 @@ def run_pipeline(
 
                 cv2.imshow(WIN_NAME, display)
 
+                # Mirror the annotated frame to the dashboard (throttled inside).
+                live_writer.write(display)
+
                 # ── X button / Q key exit detection ──────────────────────────
                 # cv2.getWindowProperty returns -1.0 when the window has been
                 # destroyed by the OS (user clicked X). We check both
@@ -476,6 +485,7 @@ def run_pipeline(
                     break
 
     finally:
+        live_writer.close()   # remove the relay file — no webcam frame lingers
         if writer is not None:
             writer.release()
             if output_path:
