@@ -31,6 +31,14 @@ interface LightPillarProps {
   mixBlendMode?: string;
   pillarRotation?: number;
   quality?: Quality;
+  /** Cycle the whole spectrum (pink→yellow→cyan…) instead of a 2-colour gradient. */
+  rainbow?: boolean;
+  /** How fast the hue drifts over time (only when rainbow). */
+  hueSpeed?: number;
+  /** How much of the spectrum is visible top-to-bottom at once (only when rainbow). */
+  hueSpread?: number;
+  /** Colour saturation for rainbow mode (0..1). */
+  saturation?: number;
 }
 
 export default function LightPillar({
@@ -47,6 +55,10 @@ export default function LightPillar({
   mixBlendMode = "screen",
   pillarRotation = 0,
   quality = "high",
+  rainbow = false,
+  hueSpeed = 0.15,
+  hueSpread = 1.0,
+  saturation = 0.9,
 }: LightPillarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number | null>(null);
@@ -152,11 +164,22 @@ export default function LightPillar({
       uniform float uPillarRotSin;
       uniform float uWaveSin;
       uniform float uWaveCos;
+      uniform bool uRainbow;
+      uniform float uHueSpeed;
+      uniform float uHueSpread;
+      uniform float uSaturation;
       varying vec2 vUv;
 
       const float STEP_MULT = ${settings.stepMultiplier.toFixed(1)};
       const int MAX_ITER = ${settings.iterations};
       const int WAVE_ITER = ${settings.waveIterations};
+
+      // HSV→RGB so rainbow mode can sweep the full spectrum from one hue value.
+      vec3 hsv2rgb(vec3 c) {
+        vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+        vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+        return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+      }
 
       void main() {
         vec2 uv = (vUv * 2.0 - 1.0) * vec2(uResolution.x / uResolution.y, 1.0);
@@ -200,7 +223,17 @@ export default function LightPillar({
           d = abs(d) * 0.15 + 0.01;
 
           float grad = clamp((15.0 - p.y) / 30.0, 0.0, 1.0);
-          col += mix(uBottomColor, uTopColor, grad) / d;
+          vec3 baseCol;
+          if (uRainbow) {
+            // ONE colour at a time, cycling through the spectrum over time.
+            // hueSpread stays 0 for a single uniform colour; raise it if you
+            // ever want a top-to-bottom gradient instead.
+            float hue = uTime * uHueSpeed + grad * uHueSpread;
+            baseCol = hsv2rgb(vec3(fract(hue), uSaturation, 1.0));
+          } else {
+            baseCol = mix(uBottomColor, uTopColor, grad);
+          }
+          col += baseCol / d;
 
           t += d * STEP_MULT;
           if(t > 50.0) break;
@@ -240,6 +273,10 @@ export default function LightPillar({
         uPillarRotSin: { value: Math.sin(pillarRotRad) },
         uWaveSin: { value: waveSin },
         uWaveCos: { value: waveCos },
+        uRainbow: { value: rainbow },
+        uHueSpeed: { value: hueSpeed },
+        uHueSpread: { value: hueSpread },
+        uSaturation: { value: saturation },
       },
       transparent: true,
       depthWrite: false,
@@ -337,6 +374,13 @@ export default function LightPillar({
   useEffect(() => setNum("uPillarWidth", pillarWidth), [pillarWidth]);
   useEffect(() => setNum("uPillarHeight", pillarHeight), [pillarHeight]);
   useEffect(() => setNum("uNoiseIntensity", noiseIntensity), [noiseIntensity]);
+  useEffect(() => setNum("uHueSpeed", hueSpeed), [hueSpeed]);
+  useEffect(() => setNum("uHueSpread", hueSpread), [hueSpread]);
+  useEffect(() => setNum("uSaturation", saturation), [saturation]);
+  useEffect(() => {
+    if (!materialRef.current) return;
+    materialRef.current.uniforms.uRainbow.value = rainbow;
+  }, [rainbow]);
   useEffect(() => {
     if (!materialRef.current) return;
     materialRef.current.uniforms.uInteractive.value = interactive;
