@@ -9,7 +9,7 @@
  * ValenceArousalPad, AlertFeed, CameraFeed.
  */
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Panel, Loading, Empty, ErrorState } from "./Panel";
 import { emotionColor, moodColor, MOOD_HINT } from "../mood";
 import { EMOTIONS } from "../types";
@@ -182,13 +182,11 @@ export function SessionsPanel({
 
 export function EmotionBars({ person, bare }: { person: LivePerson | null; bare?: boolean }) {
   const scores = person?.scores ?? {};
-  const has = Object.keys(scores).length > 0;
 
-  const body = !person ? (
-    <Empty label="no subject selected" />
-  ) : !has ? (
-    <Empty label="no expression reading yet" hint="waiting for the next measurement" />
-  ) : (
+  // Always render every emotion row. With no subject / no reading the bars sit
+  // at 0% (null values) rather than showing an empty state, so the Expression
+  // Mix stays present even when the pipeline is off — matches the reference.
+  const body = (
     <div className="ebars">
       {EMOTIONS.map((e) => {
         const v = (scores[e] ?? 0) * 100;
@@ -206,7 +204,7 @@ export function EmotionBars({ person, bare }: { person: LivePerson | null; bare?
   );
 
   if (bare) return body;
-  return <Panel title="Expression" count={person?.name ?? ""}>{body}</Panel>;
+  return <Panel title="Expression mix" count={person?.name ?? ""}>{body}</Panel>;
 }
 
 /* ── Trend chart (canvas, no chart library) ──────────────────────────────── */
@@ -341,21 +339,59 @@ export function AlertFeed({ alerts, className }: { alerts: AlertItem[]; classNam
 /* ── Camera feed placeholder ─────────────────────────────────────────────── */
 
 export function CameraFeed({
-  people, mini, onExpand,
+  people, mini, onExpand, streaming,
 }: {
   people: LivePerson[]; mini?: boolean; onExpand?: () => void;
+  /** Pipeline is running — show the real MJPEG feed instead of the placeholder. */
+  streaming?: boolean;
 }) {
+  // When streaming, mirror the pipeline's annotated frames. The stream 503s
+  // until the first frame is written, so on error we retry every 1.5s (with a
+  // fresh <img> key to force a reconnect) rather than latching to the empty
+  // state forever.
+  const [imgError, setImgError] = useState(false);
+  const [reconnect, setReconnect] = useState(0);
+  const showVideo = !!streaming && !imgError;
+
+  useEffect(() => {
+    if (!streaming || !imgError) return;
+    const t = setTimeout(() => { setImgError(false); setReconnect((k) => k + 1); }, 1500);
+    return () => clearTimeout(t);
+  }, [streaming, imgError]);
+
+  useEffect(() => { if (streaming) setImgError(false); }, [streaming]);
+
   return (
     <div className="cam" style={{ flex: "1 1 auto", minHeight: mini ? 150 : 220 }} onClick={onExpand}>
-      <div className="rec"><span className="dot" /> LIVE</div>
-      <div className="placeholder">
-        <div>camera preview</div>
-        <div style={{ fontSize: 11, opacity: 0.7 }}>
-          the pipeline renders its own OpenCV window;<br />
-          this panel mirrors detections
-        </div>
+      <div className={`rec${streaming ? "" : " off"}`}>
+        <span className="dot" /> {streaming ? "LIVE" : "OFFLINE"}
       </div>
-      {people.map((p, i) => (
+
+      {showVideo ? (
+        <img
+          key={reconnect}
+          className="cam-video"
+          src="/api/camera/stream"
+          alt="live camera feed"
+          onError={() => setImgError(true)}
+        />
+      ) : (
+        <div className="placeholder">
+          <div>{streaming ? "connecting to camera…" : "camera offline"}</div>
+          <div style={{ fontSize: 11, opacity: 0.7 }}>
+            {streaming ? (
+              <>waiting for the first frame from the pipeline</>
+            ) : (
+              <>start the program to see the live feed;<br />
+                the pipeline also opens its own window</>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Real detection boxes are already drawn onto the streamed frame; only
+          show the decorative overlay boxes when there's no live video. */}
+      {!showVideo && people.map((p, i) => (
         <div
           key={p.trackId}
           className={`detbox${p.stranger ? " stranger" : ""}`}
