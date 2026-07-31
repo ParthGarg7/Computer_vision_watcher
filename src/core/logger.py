@@ -105,7 +105,7 @@ def get_logger(name: str) -> logging.Logger:
 
 
 def _log_uncaught(exc_type, exc, tb):
-    """Log fatal tracebacks to the file, then die as Python normally would."""
+    """Log fatal tracebacks, snapshot the log into crash/, then die normally."""
     if issubclass(exc_type, KeyboardInterrupt):
         # Ctrl+C is a user action, not a crash
         sys.__excepthook__(exc_type, exc, tb)
@@ -113,4 +113,40 @@ def _log_uncaught(exc_type, exc, tb):
     logging.getLogger("watcher").critical(
         "UNCAUGHT EXCEPTION — process is terminating",
         exc_info=(exc_type, exc, tb))
+    _dump_crash_log()
     sys.__excepthook__(exc_type, exc, tb)
+
+
+CRASH_DIR = "crash"
+
+
+def _dump_crash_log(crash_dir: str = CRASH_DIR):
+    """
+    Copy the current log into crash/crash_<timestamp>.log so the record of what
+    crashed survives even if watcher.log later rotates away. Best-effort — a
+    failure here must never mask the original crash.
+    """
+    try:
+        import shutil
+        import time
+
+        src = os.path.join(LOG_DIR, LOG_FILE)
+        if not os.path.exists(src):
+            return
+        # Flush handlers so the traceback we just logged is on disk first.
+        for h in logging.getLogger().handlers:
+            try:
+                h.flush()
+            except Exception:
+                pass
+        os.makedirs(crash_dir, exist_ok=True)
+        dst = os.path.join(crash_dir, f"crash_{time.strftime('%Y%m%d_%H%M%S')}.log")
+        shutil.copy2(src, dst)
+        logging.getLogger("watcher").critical(f"crash log saved → {dst}")
+    except Exception:
+        pass
+
+
+def dump_crash_log(crash_dir: str = CRASH_DIR):
+    """Public hook: snapshot the log into crash/ on a handled fatal error too."""
+    _dump_crash_log(crash_dir)

@@ -281,6 +281,9 @@ faces/
 # Runtime logs — contain identity labels and timestamps (behavioural data)
 logs/
 
+# Crash snapshots of the log (same behavioural data), written on any crash
+crash/
+
 # ─── Layer 9 dashboard (React + Vite) ────────────────────────────────────────
 # node_modules is rebuilt by `npm install` and must never be committed.
 src/layer9_dashboard/node_modules/
