@@ -9,11 +9,22 @@ import type { HeadLook } from "./MoodHead";
 /* ── Top bar ─────────────────────────────────────────────────────────────── */
 
 export function TopBar({
-  theme, onTheme, live,
+  theme, onTheme, live, running, busy, onStart, onStop, onLogs, tweaksOpen, onTweaks,
 }: {
   theme: "dark" | "light";
   onTheme: () => void;
   live: boolean;
+  /** Is the capture pipeline currently running? */
+  running: boolean;
+  /** A start/stop request is in flight. */
+  busy: boolean;
+  onStart: () => void;
+  onStop: () => void;
+  /** Navigate to the full backend-logs page. */
+  onLogs: () => void;
+  /** 3D-head tweaks panel: open state + toggle. */
+  tweaksOpen: boolean;
+  onTweaks: () => void;
 }) {
   const [clock, setClock] = useState(() => new Date().toLocaleTimeString());
   useEffect(() => {
@@ -34,6 +45,32 @@ export function TopBar({
         <span className="led" />
         {live ? "live" : "offline"}
       </div>
+
+      {/* Start / stop the capture pipeline (main.py) straight from the UI. */}
+      <button
+        className={`runbtn${running ? " on" : ""}`}
+        onClick={running ? onStop : onStart}
+        disabled={busy}
+        title={running ? "stop the capture pipeline"
+                       : "start the capture pipeline (python main.py)"}
+      >
+        <span className="rdot" />
+        {busy ? "working…" : running ? "stop program" : "start program"}
+      </button>
+
+      {/* Open the 3D-head tweak controls from the top bar. */}
+      <button
+        className={`tweakbtn${tweaksOpen ? " on" : ""}`}
+        onClick={onTweaks}
+        title="3D head tweaks"
+      >
+        ⚙ tweaks
+      </button>
+
+      {/* Go to the full backend-logs page (every layer). */}
+      <button className="logbtn" onClick={onLogs} title="Open the backend logs page">
+        ▤ logs
+      </button>
 
       {/* Single focus view — no layout switcher. Only the theme toggle remains. */}
       <div className="switcher">
@@ -109,12 +146,15 @@ export function BackgroundFX() {
 /* ── Tweaks panel (3D head controls) ─────────────────────────────────────── */
 
 export function TweaksPanel({
-  look, onChange,
+  look, onChange, open, onToggle,
 }: {
   look: HeadLook;
   onChange: (patch: Partial<HeadLook>) => void;
+  /** Controlled open state (driven from the top-bar Tweaks button). */
+  open: boolean;
+  onToggle: () => void;
 }) {
-  const [collapsed, setCollapsed] = useState(true);
+  const collapsed = !open;
 
   const Slider = ({ label, k, min, max, step }: {
     label: string; k: "speed" | "glow" | "wire"; min: number; max: number; step: number;
@@ -137,7 +177,7 @@ export function TweaksPanel({
 
   return (
     <div id="tweaks" className={collapsed ? "collapsed" : ""}>
-      <div className="tw-head" onClick={() => setCollapsed((c) => !c)}>
+      <div className="tw-head" onClick={onToggle}>
         <span className="gear">⚙</span> Tweaks · 3D head
         <span className="chev">{collapsed ? "▴" : "▾"}</span>
       </div>

@@ -37,6 +37,26 @@ async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function post<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, { method: "POST", signal });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      detail = (await res.json())?.detail ?? detail;
+    } catch {
+      /* non-JSON error body — keep statusText */
+    }
+    throw new ApiError(detail, res.status);
+  }
+  return res.json() as Promise<T>;
+}
+
+/** Whether the capture pipeline the server launched is currently running. */
+export interface PipelineState {
+  running: boolean;
+  pid: number | null;
+}
+
 export const api = {
   health: (s?: AbortSignal) => get<Health>("/api/health", s),
 
@@ -66,6 +86,15 @@ export const api = {
   recentEvents: (limit = 50, s?: AbortSignal) =>
     get<{ events: ExpressionEvent[] }>(`/api/events/recent?limit=${limit}`, s)
       .then((r) => r.events),
+
+  // ── pipeline control (the one write path from the dashboard) ──────────────
+  pipelineStatus: (s?: AbortSignal) => get<PipelineState>("/api/pipeline/status", s),
+  startPipeline: (s?: AbortSignal) => post<PipelineState>("/api/pipeline/start", s),
+  stopPipeline: (s?: AbortSignal) => post<PipelineState>("/api/pipeline/stop", s),
+
+  // ── backend log tail (incremental; pass the returned cursor back) ─────────
+  logs: (cursor = -1, s?: AbortSignal) =>
+    get<{ cursor: number; lines: string[] }>(`/api/logs?cursor=${cursor}`, s),
 };
 
 /** WebSocket URL for the live channel, derived from the current origin. */

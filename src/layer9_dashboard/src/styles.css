@@ -41,7 +41,7 @@
   --grid: oklch(1 0 0 / .07);
   --trace: oklch(1 0 0 / .09);
   --dot:  oklch(0.62 0.16 250 / 0.22);   /* dot-matrix background */
-  --edge: oklch(0.66 0.18 248 / 0.55);   /* dashed boundary */
+  --edge: oklch(0.74 0.17 248 / 0.9);    /* panel boundary — visible section line */
   --radius: 12px;
   --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -68,7 +68,7 @@
   --grid: oklch(0 0 0 / .08);
   --trace: oklch(0 0 0 / .07);
   --dot:  oklch(0.50 0.14 250 / 0.20);
-  --edge: oklch(0.52 0.18 248 / 0.5);
+  --edge: oklch(0.48 0.18 248 / 0.85);
 }
 
 *{ box-sizing:border-box; }
@@ -123,6 +123,34 @@ a:hover{ color: var(--acc-amber); }
 .switcher button.on{ background:var(--panel-2); color:var(--ink); box-shadow:0 1px 0 rgba(0,0,0,.3); }
 .clock{ font-family:var(--mono); font-size:12px; color:var(--ink-dim); }
 
+/* Start / stop pipeline button in the top bar */
+.runbtn{
+  display:flex; align-items:center; gap:8px;
+  font-family:var(--mono); font-size:12px; color:var(--ink);
+  background:var(--panel); border:1px solid var(--edge); border-radius:9px;
+  padding:7px 13px; cursor:pointer; transition:border-color .15s, background .15s;
+}
+.runbtn:hover{ border-color:var(--good); }
+.runbtn:disabled{ opacity:.6; cursor:default; }
+.runbtn .rdot{ width:8px; height:8px; border-radius:50%; background:var(--good);
+  box-shadow:0 0 8px var(--good); flex:0 0 auto; }
+.runbtn.on{ border-color:var(--bad); }
+.runbtn.on .rdot{ background:var(--bad); box-shadow:0 0 8px var(--bad); animation:pulse 1.4s infinite; }
+
+/* Live-logs toggle in the top bar */
+.logbtn{ font-family:var(--mono); font-size:12px; color:var(--ink-dim);
+  background:var(--panel); border:1px solid var(--edge); border-radius:9px;
+  padding:7px 12px; cursor:pointer; transition:border-color .15s, color .15s; }
+.logbtn:hover{ color:var(--ink); border-color:var(--acc-cyan); }
+.logbtn.on{ color:var(--ink); border-color:var(--acc-cyan); box-shadow:0 0 0 1px var(--acc-cyan); }
+
+/* 3D-head tweaks toggle in the top bar */
+.tweakbtn{ font-family:var(--mono); font-size:12px; color:var(--ink-dim);
+  background:var(--panel); border:1px solid var(--edge); border-radius:9px;
+  padding:7px 12px; cursor:pointer; transition:border-color .15s, color .15s; }
+.tweakbtn:hover{ color:var(--ink); border-color:var(--acc-mag); }
+.tweakbtn.on{ color:var(--ink); border-color:var(--acc-mag); box-shadow:0 0 0 1px var(--acc-mag); }
+
 /* Stage that holds whichever layout is active */
 #stage{ flex:1 1 auto; min-height:0; padding:14px; }
 
@@ -131,9 +159,11 @@ a:hover{ color: var(--acc-amber); }
   background: var(--panel);
   backdrop-filter: blur(16px) saturate(1.2);
   -webkit-backdrop-filter: blur(16px) saturate(1.2);
-  border:1px dashed var(--edge);
+  /* Solid, clearly-visible boundary so each section reads as its own card
+     (was a faint dashed line that vanished against the background). */
+  border:1px solid var(--edge);
   border-radius: var(--radius);
-  box-shadow: var(--panel-shadow);
+  box-shadow: var(--panel-shadow), 0 0 18px -8px var(--acc-blue);
   display:flex; flex-direction:column; min-height:0; min-width:0;
 }
 .panel > h3{
@@ -168,6 +198,10 @@ a:hover{ color: var(--acc-amber); }
   background:rgba(0,0,0,.45); padding:5px 9px; border-radius:6px;
 }
 .cam .rec .dot{ width:8px; height:8px; border-radius:50%; background:var(--bad); animation:pulse 1.4s infinite; }
+.cam .rec.off{ color:var(--ink-faint); }
+.cam .rec.off .dot{ background:var(--ink-faint); animation:none; }
+/* Live MJPEG feed fills the panel */
+.cam-video{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; z-index:1; }
 .cam .expand-hint{
   position:absolute; bottom:10px; right:12px; z-index:3;
   font-family:var(--mono); font-size:10px; color:var(--ink-dim);
@@ -331,6 +365,16 @@ canvas{ display:block; width:100%; }
 .focus-grid{ display:grid; grid-template-columns:1.15fr 1fr; gap:18px;
   height:100%; min-height:0; }
 
+/* Expression-mix column (right of the head) — always visible, even at 0%.
+   The left border is the visible divider that separates it from the 3D head,
+   so the two read as individual components (like the reference). */
+.exprmix{ display:flex; flex-direction:column; min-width:0; overflow:auto;
+  border-left:1px solid var(--edge); padding-left:20px; }
+.exprmix-head{ display:flex; align-items:center; justify-content:space-between;
+  font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink-faint);
+  font-weight:600; padding-bottom:10px; margin-bottom:8px; border-bottom:1px solid var(--line); }
+.exprmix-head .who{ color:var(--ink-dim); font-family:var(--mono); text-transform:none; letter-spacing:0; }
+
 /* ---------- WebGL 3D head ---------- */
 .head-stage{ position:relative; }
 .head-canvas{ position:absolute; inset:0; width:100%; height:100%; display:block; cursor:grab; touch-action:none; }
@@ -360,6 +404,17 @@ canvas{ display:block; width:100%; }
 .tw-toggle .sw::after{ content:""; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:var(--ink-faint); transition:.2s; }
 .tw-toggle .sw.on{ background:var(--acc-mag); }
 .tw-toggle .sw.on::after{ left:18px; background:#fff; }
+
+/* Fullscreen camera expand (click the CAM panel) */
+.cam-modal{ position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center;
+  background:oklch(0.10 0.01 260 / .86); backdrop-filter:blur(6px); padding:44px; cursor:zoom-out; }
+.cam-modal .cam-video.big{ position:relative; inset:auto; max-width:100%; max-height:100%;
+  width:auto; height:auto; object-fit:contain; border:1px solid var(--edge);
+  border-radius:12px; box-shadow:var(--panel-shadow); }
+.cam-modal .closex{ position:absolute; top:18px; right:22px; z-index:61;
+  font-family:var(--mono); font-size:12px; color:var(--ink);
+  background:var(--panel); border:1px solid var(--edge); border-radius:8px;
+  padding:8px 12px; cursor:pointer; }
 
 /* =========================================================================
    React port additions
@@ -397,3 +452,57 @@ canvas{ display:block; width:100%; }
    stage can claim the leftover space; without this the canvas stays 220px
    tall inside a 427px panel. */
 .head-stage{ flex:1 1 auto; min-height:220px; }
+
+/* ---------- Backend logs page (#/logs) ---------- */
+.logs-page{ flex:1 1 auto; min-height:0; display:grid; grid-template-columns:260px 1fr;
+  gap:14px; padding:14px; }
+.logs-side{ display:flex; flex-direction:column; gap:6px; overflow:auto; min-height:0; }
+.logs-tab{ display:flex; align-items:center; gap:10px; text-align:left;
+  font-family:var(--mono); font-size:12px; color:var(--ink-dim);
+  background:var(--panel); border:1px solid var(--line); border-radius:9px;
+  padding:9px 11px; cursor:pointer; transition:.12s; }
+.logs-tab:hover{ color:var(--ink); border-color:var(--acc-cyan); }
+.logs-tab.on{ color:var(--ink); border-color:var(--acc-cyan);
+  box-shadow:0 0 0 1px var(--acc-cyan); background:var(--panel-2); }
+.logs-tab .nm{ flex:1 1 auto; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.logs-tab .ct{ color:var(--ink-faint); font-size:11px; }
+
+/* layer condition dot */
+.cond{ width:9px; height:9px; border-radius:50%; flex:0 0 auto; background:var(--ink-faint); }
+.cond-ok{ background:var(--good); box-shadow:0 0 7px var(--good); }
+.cond-warn{ background:var(--warn); box-shadow:0 0 7px var(--warn); }
+.cond-error{ background:var(--bad); box-shadow:0 0 7px var(--bad); animation:pulse 1.4s infinite; }
+.cond-idle{ background:var(--ink-faint); opacity:.5; }
+
+.logs-main{ display:flex; flex-direction:column; min-height:0; min-width:0;
+  background:var(--panel); border:1px solid var(--edge); border-radius:var(--radius);
+  box-shadow:var(--panel-shadow); overflow:hidden; }
+.logs-main-head{ display:flex; align-items:center; gap:12px; padding:11px 14px;
+  border-bottom:1px solid var(--line); flex:0 0 auto; }
+.logs-main-head .ttl{ font-family:var(--mono); font-size:12px; letter-spacing:.08em;
+  color:var(--ink-dim); font-weight:600; }
+.logs-main-head .logs-count{ margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--ink-faint); }
+.cond-pill{ font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:.06em;
+  padding:2px 9px; border-radius:20px; border:1px solid var(--line); color:var(--ink-dim); }
+.cond-pill.cond-ok{ color:var(--good); border-color:color-mix(in oklch,var(--good) 50%,transparent);
+  background:transparent; box-shadow:none; }
+.cond-pill.cond-warn{ color:var(--warn); border-color:color-mix(in oklch,var(--warn) 50%,transparent);
+  background:transparent; box-shadow:none; }
+.cond-pill.cond-error{ color:var(--bad); border-color:color-mix(in oklch,var(--bad) 55%,transparent);
+  background:transparent; box-shadow:none; animation:none; }
+.cond-pill.cond-idle{ color:var(--ink-faint); background:transparent; box-shadow:none; }
+.logs-stream{ flex:1 1 auto; min-height:0; overflow:auto; padding:10px 14px;
+  font-family:var(--mono); font-size:12px; line-height:1.55; }
+.logcon-empty{ color:var(--ink-faint); padding:16px; text-align:center; }
+.logln{ display:grid; grid-template-columns:84px 66px 104px 1fr; gap:10px; align-items:baseline;
+  padding:1px 0; white-space:pre-wrap; word-break:break-word; }
+.logln .t{ color:var(--ink-faint); }
+.logln .lv{ font-weight:600; }
+.logln .ly{ color:var(--acc-cyan); }
+.logln .mg{ color:var(--ink-dim); }
+.logln.lv-info .lv{ color:var(--acc-blue); }
+.logln.lv-debug{ opacity:.7; }
+.logln.lv-debug .lv{ color:var(--ink-faint); }
+.logln.lv-warning .lv, .logln.lv-warning .mg{ color:var(--warn); }
+.logln.lv-error .lv, .logln.lv-error .mg,
+.logln.lv-critical .lv, .logln.lv-critical .mg{ color:var(--bad); }

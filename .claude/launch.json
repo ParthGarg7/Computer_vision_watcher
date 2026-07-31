@@ -6,6 +6,12 @@
       "runtimeExecutable": ".venv/Scripts/python.exe",
       "runtimeArgs": ["run_api.py"],
       "port": 8000
+    },
+    {
+      "name": "watcher-dashboard",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "src/layer9_dashboard", "run", "dev"],
+      "port": 5173
     }
   ]
 }

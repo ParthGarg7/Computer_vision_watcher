@@ -73,9 +73,10 @@ export default function MoodHead({ mood, look }: Props) {
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
-    // Closer than the old neck-having head: with the neck gone the mesh is
-    // pure face+cranium, so it can sit larger in the panel.
-    camera.position.set(0, 0, 2.7);
+    // Pulled back so the WHOLE head (cranium + full face) is framed inside the
+    // panel with breathing room, rather than a zoomed-in face that clips at
+    // the edges.
+    camera.position.set(0, 0, 4.1);
 
     // ── geometry (shared by both passes) ─────────────────────────────────
     const geom = new THREE.BufferGeometry();

@@ -50,12 +50,15 @@ import asyncio
 import json
 import os
 import sqlite3
+import subprocess
+import sys
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, WebSocket
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketDisconnect
 
+from src.core.live_frame import LIVE_FRAME_PATH, frame_is_fresh
 from src.core.logger import get_logger
 from src.layer4_identity.identity_store import DEFAULT_STORE_PATH
 from src.layer7_storage.store import DEFAULT_DB_PATH
@@ -422,6 +425,190 @@ async def register_identity(
 
 
 _EMBEDDER = None
+
+
+# ─── Pipeline control ─────────────────────────────────────────────────────────
+#
+# The dashboard is READ-ONLY over the database; these three endpoints are the
+# one exception — they let the operator start/stop the capture pipeline
+# (main.py) from the UI instead of a terminal. The command is fixed
+# (sys.executable + main.py), so there is no user input to inject.
+
+_PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_pipeline_proc: "subprocess.Popen | None" = None
+
+
+def _pipeline_running() -> bool:
+    return _pipeline_proc is not None and _pipeline_proc.poll() is None
+
+
+@app.get("/api/pipeline/status")
+def pipeline_status():
+    """Whether the capture pipeline (main.py) this server launched is running."""
+    running = _pipeline_running()
+    return {"running": running,
+            "pid": _pipeline_proc.pid if running else None}
+
+
+@app.post("/api/pipeline/start")
+def pipeline_start():
+    """
+    Launch the capture pipeline (python main.py) as a background process.
+
+    Idempotent: a second call while a run is live is a no-op, not a second
+    webcam grab. Returns the same shape as /status so the dashboard can poll.
+    """
+    global _pipeline_proc
+    if _pipeline_running():
+        return {"running": True, "pid": _pipeline_proc.pid, "already": True}
+
+    main_py = os.path.join(_PROJECT_ROOT, "main.py")
+    if not os.path.exists(main_py):
+        raise HTTPException(status_code=500,
+                            detail=f"main.py not found at {main_py}")
+    try:
+        # --source 0 = default webcam; without it main.py drops into the
+        # interactive source menu and exits immediately on no stdin.
+        _pipeline_proc = subprocess.Popen(
+            [sys.executable, main_py, "--source", "0"], cwd=_PROJECT_ROOT)
+    except Exception as e:
+        log.exception("[Layer8] failed to start pipeline")
+        raise HTTPException(status_code=500,
+                            detail=f"could not start pipeline: {e}")
+    log.info(f"  [Layer8] pipeline started (pid {_pipeline_proc.pid})")
+    return {"running": True, "pid": _pipeline_proc.pid}
+
+
+@app.post("/api/pipeline/stop")
+def pipeline_stop():
+    """Stop a pipeline this server started. No-op if nothing is running."""
+    global _pipeline_proc
+    if not _pipeline_running():
+        return {"running": False, "pid": None}
+    pid = _pipeline_proc.pid
+    _pipeline_proc.terminate()
+    try:
+        _pipeline_proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        _pipeline_proc.kill()
+    log.info(f"  [Layer8] pipeline stopped (pid {pid})")
+    _pipeline_proc = None
+    return {"running": False, "pid": None}
+
+
+# ─── Live camera relay ────────────────────────────────────────────────────────
+#
+# The pipeline drops its annotated frame into a small JPEG (src/core/live_frame);
+# here we stream it as MJPEG so the dashboard's CAM panel mirrors the real feed.
+# Served ONLY while that frame is fresh, and run_api.py binds 127.0.0.1 by
+# default, so the webcam feed never leaves the machine.
+
+_MJPEG_BOUNDARY = "watcherframe"
+_STREAM_FPS = 15
+
+
+def _read_fresh_frame() -> "bytes | None":
+    """Latest relay JPEG, or None when the pipeline isn't writing one."""
+    if not frame_is_fresh():
+        return None
+    try:
+        with open(LIVE_FRAME_PATH, "rb") as f:
+            data = f.read()
+    except OSError:
+        return None
+    # Guard a torn read during the writer's atomic swap: a complete JPEG ends
+    # with the FFD9 end-of-image marker.
+    if len(data) < 128 or data[-2:] != b"\xff\xd9":
+        return None
+    return data
+
+
+@app.get("/api/camera/frame.jpg")
+def camera_frame():
+    """Single latest webcam frame (snapshot / fallback). 503 when offline."""
+    data = _read_fresh_frame()
+    if data is None:
+        raise HTTPException(status_code=503,
+                            detail="no live camera — start the pipeline")
+    return Response(content=data, media_type="image/jpeg",
+                    headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/camera/stream")
+async def camera_stream():
+    """MJPEG stream of the pipeline's annotated webcam frames."""
+    if not frame_is_fresh():
+        raise HTTPException(status_code=503,
+                            detail="no live camera — start the pipeline")
+
+    async def gen():
+        misses = 0
+        while True:
+            data = _read_fresh_frame()
+            if data is None:
+                misses += 1
+                if misses > _STREAM_FPS * 2:      # ~2s with no fresh frame
+                    break
+                await asyncio.sleep(1 / _STREAM_FPS)
+                continue
+            misses = 0
+            yield (b"--" + _MJPEG_BOUNDARY.encode() + b"\r\n"
+                   b"Content-Type: image/jpeg\r\n"
+                   b"Content-Length: " + str(len(data)).encode() + b"\r\n\r\n"
+                   + data + b"\r\n")
+            await asyncio.sleep(1 / _STREAM_FPS)
+
+    return StreamingResponse(
+        gen(),
+        media_type=f"multipart/x-mixed-replace; boundary={_MJPEG_BOUNDARY}",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate",
+                 "Pragma": "no-cache"})
+
+
+# ─── Backend log tail ─────────────────────────────────────────────────────────
+#
+# Incremental tail of logs/watcher.log so the dashboard can show every layer's
+# real-time log. Localhost-only (run_api.py binds 127.0.0.1). Lines can carry
+# identity labels — same behavioural data as the on-disk log, which is why
+# logs/ is gitignored; it never leaves the machine.
+
+_LOG_PATH = os.path.join(_PROJECT_ROOT, "logs", "watcher.log")
+
+
+@app.get("/api/logs")
+def logs(cursor: int = -1, max_bytes: int = 65536):
+    """
+    Tail logs/watcher.log. First call (cursor < 0) returns the tail of the
+    file; pass the returned `cursor` back to receive only new lines since.
+    Only complete lines are returned, and `cursor` always lands on a line
+    boundary so nothing is duplicated or split across polls.
+    """
+    try:
+        size = os.path.getsize(_LOG_PATH)
+    except OSError:
+        return {"cursor": 0, "lines": []}
+
+    # cursor past EOF means the file rotated/truncated — restart from the tail.
+    start = max(0, size - max_bytes) if (cursor < 0 or cursor > size) else cursor
+    try:
+        with open(_LOG_PATH, "rb") as f:
+            f.seek(start)
+            raw = f.read()
+    except OSError:
+        return {"cursor": size, "lines": []}
+
+    last_nl = raw.rfind(b"\n")
+    if last_nl == -1:
+        return {"cursor": start, "lines": []}   # no complete line yet
+    text = raw[:last_nl].decode("utf-8", errors="replace")
+    lines = text.split("\n")
+    if cursor < 0 and start > 0 and lines:
+        lines = lines[1:]                        # drop a partial first line
+    # rstrip("\r") — the log file is written with \r\n on Windows; split("\n")
+    # leaves a trailing CR that would otherwise ride along in each line.
+    lines = [ln.rstrip("\r") for ln in lines if ln.strip()]
+    return {"cursor": start + last_nl + 1, "lines": lines}
 
 
 # ─── Static assets (mounted last so /api and /ws win) ────────────────────────
